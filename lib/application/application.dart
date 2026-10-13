@@ -2,21 +2,68 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../fonctionnalites/info_departs/ecran_info_departs.dart';
-import '../noyau/alerte_en_cours.dart';
+import '../fonctionnalites/principal/ecran_principal.dart';
+import '../noyau/position_utilisateur.dart';
+import '../noyau/service_alertes.dart';
+import '../noyau/service_auth.dart';
+import '../noyau/service_carnet.dart';
+import '../noyau/service_localisation.dart';
+import '../noyau/service_messagerie.dart';
+import '../noyau/service_photo.dart';
 
 /// Racine de l'application.
 class ApplicationStarPole extends StatelessWidget {
-  const ApplicationStarPole({super.key});
+  const ApplicationStarPole({
+    super.key,
+    required this.auth,
+    required this.alertes,
+    required this.messagerie,
+    this.photos,
+    this.localisation,
+    this.carnet,
+  });
+
+  /// Le service de compte (Firebase dans l'appli, un faux dans les tests).
+  final ServiceAuth auth;
+
+  /// Le service des alertes (Firestore dans l'appli, un faux dans les tests).
+  final ServiceAlertes alertes;
+
+  /// Le service des contacts et des conversations (un faux dans les tests).
+  final ServiceMessagerie messagerie;
+
+  /// Le service de choix de photo (un faux dans les tests).
+  final ServicePhoto? photos;
+
+  /// Le service de position (un faux dans les tests).
+  final ServiceLocalisation? localisation;
+
+  /// Le service du carnet de contacts du téléphone (un faux dans les tests).
+  final ServiceCarnet? carnet;
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => AlerteEnCoursNotifier(),
+    final servicePosition = localisation ?? ServiceLocalisationReel();
+    return MultiProvider(
+      providers: [
+        Provider<ServiceAuth>.value(value: auth),
+        Provider<ServiceAlertes>.value(value: alertes),
+        Provider<ServiceMessagerie>.value(value: messagerie),
+        Provider<ServicePhoto>.value(value: photos ?? ServicePhotoReel()),
+        Provider<ServiceLocalisation>.value(value: servicePosition),
+        Provider<ServiceCarnet>.value(value: carnet ?? ServiceCarnetReel()),
+        ChangeNotifierProvider(
+          create: (_) => PositionUtilisateur(servicePosition),
+        ),
+      ],
       child: MaterialApp(
         title: 'StarPole',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(fontFamily: 'Poppins'),
-        home: const EcranInfoDeparts(),
+        // Déjà connecté : on va directement à l'accueil.
+        home: auth.estConnecte
+            ? const EcranPrincipal()
+            : const EcranInfoDeparts(),
       ),
     );
   }

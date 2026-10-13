@@ -1,0 +1,27 @@
+{
+  "firestore": {
+    "database": "(default)",
+    "location": "europe-west9",
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "starpole-3d84d",
+          "appId": "1:1074257648472:android:02a8229b11ca4460fae32d",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "starpole-3d84d",
+          "configurations": {
+            "android": "1:1074257648472:android:02a8229b11ca4460fae32d"
+          }
+        }
+      }
+    }
+  }
+}

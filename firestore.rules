@@ -1,0 +1,171 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Profil d'un utilisateur : tout utilisateur connecté peut lire un profil
+    // précis (pour voir le nom d'un voisin) ou en chercher un (recherche d'un
+    // contact, ou recherche des contacts du carnet : au plus 30 résultats,
+    // donc impossible de télécharger tous les profils). Seul le propriétaire peut créer ou modifier son profil, et
+    // personne ne peut le supprimer depuis l'appli.
+    match /utilisateurs/{uid} {
+      allow get: if request.auth != null;
+      allow list: if request.auth != null && request.query.limit <= 30;
+      // La photo (texte base64) est limitée à environ 200 Ko.
+      allow create, update: if request.auth != null
+        && request.auth.uid == uid
+        && (!('photo' in request.resource.data)
+            || request.resource.data.photo.size() < 300000);
+      allow delete: if false;
+
+      // Mes contacts : visibles et modifiables par moi seul.
+      match /contacts/{contactId} {
+        allow read: if request.auth != null && request.auth.uid == uid;
+        allow create, update: if request.auth != null
+          && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly(['nom', 'telephone', 'ajouteLe'])
+          && request.resource.data.nom is string
+          && request.resource.data.nom.size() < 100;
+        allow delete: if request.auth != null && request.auth.uid == uid;
+      }
+    }
+
+    // Alertes (urgences, dons, services).
+    match /alertes/{id} {
+      // Tout utilisateur connecté peut voir les alertes.
+      allow read: if request.auth != null;
+
+      // Publier : on ne peut publier qu'en son propre nom, une alerte
+      // « en cours » et sans aidant, avec uniquement les champs prévus.
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly([
+             'type', 'categorie', 'description', 'ville', 'quartier',
+             'latitude', 'longitude', 'auteurId', 'auteurNom', 'statut',
+             'creeLe', 'aidantId', 'aidantNom', 'accepteLe', 'termineLe',
+             'photo'
+           ])
+        && request.resource.data.auteurId == request.auth.uid
+        && request.resource.data.statut == 'en_cours'
+        && request.resource.data.aidantId == null
+        && request.resource.data.type in ['urgence', 'don', 'service']
+        && request.resource.data.categorie is string
+        && request.resource.data.categorie.size() < 60
+        && request.resource.data.description is string
+        && request.resource.data.description.size() < 1000
+        && request.resource.data.ville is string
+        && (request.resource.data.photo == null
+            || request.resource.data.photo.size() < 300000);
+
+      allow update: if request.auth != null && (
+        // Quelqu'un (autre que l'auteur) accepte d'aider une alerte libre.
+        ( resource.data.aidantId == null
+          && resource.data.statut == 'en_cours'
+          && resource.data.auteurId != request.auth.uid
+          && request.resource.data.aidantId == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['aidantId', 'aidantNom', 'accepteLe']) )
+        ||
+        // L'auteur ou la personne qui aide marque l'alerte comme résolue.
+        ( (resource.data.auteurId == request.auth.uid
+           || resource.data.aidantId == request.auth.uid)
+          && request.resource.data.statut == 'resolue'
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['statut', 'termineLe']) )
+        ||
+        // La personne qui aide arrête d'aider : l'alerte redevient libre.
+        ( resource.data.aidantId == request.auth.uid
+          && request.resource.data.aidantId == null
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['aidantId', 'aidantNom', 'accepteLe']) )
+      );
+
+      allow delete: if false;
+
+      // Messages d'avancement d'une alerte (« Je suis en route »...) : tout
+      // utilisateur connecté peut les lire ; seuls l'auteur de l'alerte et la
+      // personne qui aide peuvent en écrire, en leur propre nom, et on ne peut
+      // ni les modifier ni les supprimer.
+      match /progression/{messageId} {
+        allow read: if request.auth != null;
+        allow create: if request.auth != null
+          && request.resource.data.keys().hasOnly(
+               ['texte', 'auteurId', 'auteurNom', 'creeLe'])
+          && request.resource.data.auteurId == request.auth.uid
+          && request.resource.data.texte is string
+          && request.resource.data.texte.size() > 0
+          && request.resource.data.texte.size() <= 300
+          && (get(/databases/$(database)/documents/alertes/$(id)).data.auteurId
+                == request.auth.uid
+              || get(/databases/$(database)/documents/alertes/$(id)).data.aidantId
+                == request.auth.uid);
+        allow update, delete: if false;
+      }
+    }
+
+    // Notes données après une alerte.
+    match /avis/{id} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.deId == request.auth.uid
+        && request.resource.data.pourId != request.auth.uid
+        && request.resource.data.etoiles is int
+        && request.resource.data.etoiles >= 1
+        && request.resource.data.etoiles <= 5
+        && request.resource.data.commentaire is string
+        && request.resource.data.commentaire.size() <= 200;
+      allow update, delete: if false;
+    }
+
+    // Conversations entre deux personnes. L'identifiant est formé des deux
+    // identifiants de compte, triés, séparés par « _ ». Seuls les deux
+    // participants peuvent lire et écrire.
+    match /conversations/{cid} {
+      // Ouvrir une conversation qui n'existe pas encore est permis (c'est
+      // ainsi qu'on la crée) ; sinon, il faut en faire partie.
+      allow get: if request.auth != null
+        && (resource == null || request.auth.uid in resource.data.participants);
+      allow list: if request.auth != null
+        && request.auth.uid in resource.data.participants;
+
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly(
+             ['participants', 'noms', 'creeLe', 'dernierMessage',
+              'dernierAuteurId', 'dernierTemps', 'lu'])
+        && request.resource.data.participants.size() == 2
+        && request.auth.uid in request.resource.data.participants
+        && (cid == request.resource.data.participants[0] + '_'
+                   + request.resource.data.participants[1]
+            || cid == request.resource.data.participants[1] + '_'
+                      + request.resource.data.participants[0]);
+
+      // Mettre à jour le dernier message et la date de lecture : seulement
+      // ces champs, et le dernier auteur est forcément moi.
+      allow update: if request.auth != null
+        && request.auth.uid in resource.data.participants
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+             ['dernierMessage', 'dernierAuteurId', 'dernierTemps', 'lu'])
+        && (!request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['dernierAuteurId'])
+            || request.resource.data.dernierAuteurId == request.auth.uid);
+      allow delete: if false;
+
+      match /messages/{mid} {
+        allow read: if request.auth != null
+          && request.auth.uid in get(/databases/$(database)/documents/conversations/$(cid)).data.participants;
+        allow create: if request.auth != null
+          && request.auth.uid in get(/databases/$(database)/documents/conversations/$(cid)).data.participants
+          && request.resource.data.keys().hasOnly(['texte', 'auteurId', 'creeLe'])
+          && request.resource.data.auteurId == request.auth.uid
+          && request.resource.data.texte is string
+          && request.resource.data.texte.size() > 0
+          && request.resource.data.texte.size() <= 1000;
+        allow update, delete: if false;
+      }
+    }
+
+    // Tout le reste est verrouillé tant qu'on n'a pas écrit ses règles.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

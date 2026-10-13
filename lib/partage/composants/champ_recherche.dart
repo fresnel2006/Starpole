@@ -5,9 +5,16 @@ import '../styles.dart';
 
 /// Champ de recherche blanc arrondi avec une loupe.
 class ChampRecherche extends StatelessWidget {
-  const ChampRecherche({super.key, required this.indication});
+  const ChampRecherche({
+    super.key,
+    required this.indication,
+    this.auChangement,
+  });
 
   final String indication;
+
+  /// Appelé à chaque lettre tapée (pour filtrer une liste).
+  final ValueChanged<String>? auChangement;
 
   @override
   Widget build(BuildContext context) {
@@ -26,6 +33,7 @@ class ChampRecherche extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: TextField(
+              onChanged: auChangement,
               style: Styles.gras(12, Colors.black),
               decoration: InputDecoration(
                 hintText: indication,

@@ -1,4 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Position de l'utilisateur : précise (GPS) et approximative (réseau). -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Carnet de contacts : pour retrouver ses proches qui ont StarPole. -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
     <application
         android:label="projet_starpole"
         android:name="${applicationName}"

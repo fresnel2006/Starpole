@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../application/couleurs.dart';
+import '../../noyau/alerte.dart';
+import '../../noyau/format_temps.dart';
+import '../../noyau/position_utilisateur.dart';
+import '../../noyau/service_alertes.dart';
+import '../../noyau/service_localisation.dart';
+import '../../partage/composants/apparence_alerte.dart';
 import '../../partage/composants/champ_recherche.dart';
 import '../../partage/composants/effet_creux.dart';
-import '../../partage/composants/icone_sirene.dart';
 import '../../partage/styles.dart';
 import '../alertes/ecran_details_alerte.dart';
 
@@ -20,14 +26,48 @@ class _EcranAccueilState extends State<EcranAccueil> {
   /// Vrai quand les trois tuiles (urgences, aides, dons) sont affichées.
   bool _tuilesVisibles = false;
 
-  void _ouvrirDetails() {
-    Navigator.of(
-      context,
-    ).push(MaterialPageRoute<void>(builder: (_) => const EcranDetailsAlerte()));
+  /// Les alertes, en direct : l'écran se met à jour quand quelqu'un en publie.
+  late final Stream<List<Alerte>> _alertes = context
+      .read<ServiceAlertes>()
+      .alertes();
+
+  @override
+  void initState() {
+    super.initState();
+    // On cherche la position une fois, la première fois qu'on arrive ici.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final position = context.read<PositionUtilisateur>();
+      if (position.resultat == null) position.actualiser();
+    });
+  }
+
+  /// Les alertes en cours de la ville de l'utilisateur (toutes, si on ne
+  /// connaît pas encore sa ville).
+  List<Alerte> _proches(List<Alerte> toutes, LieuActuel? lieu) {
+    return toutes
+        .where(
+          (a) =>
+              a.statut == StatutAlerte.enCours &&
+              (lieu == null || a.ville.isEmpty || a.ville == lieu.ville),
+        )
+        .take(20)
+        .toList();
+  }
+
+  void _ouvrirDetails(Alerte alerte) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => EcranDetailsAlerte(alerte: alerte),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final position = context.watch<PositionUtilisateur>();
+    final resultat = position.resultat;
+
     return Stack(
       children: [
         // Photo de la ville qui s'estompe vers le blanc.
@@ -35,11 +75,17 @@ class _EcranAccueilState extends State<EcranAccueil> {
         SafeArea(
           bottom: false,
           child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 110),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const _Lieu(),
+                _Lieu(
+                  resultat: resultat,
+                  auAppui:
+                      resultat == null || resultat.etat == EtatLocalisation.ok
+                      ? null
+                      : position.reessayer,
+                ),
                 const SizedBox(height: 16),
                 const ChampRecherche(
                   indication: 'Rechercher un aide, une alerte , un lien ....',
@@ -63,31 +109,63 @@ class _EcranAccueilState extends State<EcranAccueil> {
                   const _TuilesTypes(),
                 ],
                 const SizedBox(height: 26),
-                const _TitreSection(
-                  icone: Icon(Icons.gps_fixed, size: 22, color: Colors.black),
-                  texte: 'Alertes a proximité',
-                  droite: _BadgeNombre(texte: '2 Alertes'),
+                StreamBuilder<List<Alerte>>(
+                  stream: _alertes,
+                  builder: (context, instantane) {
+                    final toutes = instantane.data;
+                    final proches = toutes == null
+                        ? const <Alerte>[]
+                        : _proches(toutes, position.lieu);
+                    final nombre = proches.length;
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _TitreSection(
+                          icone: const Icon(
+                            Icons.gps_fixed,
+                            size: 22,
+                            color: Colors.black,
+                          ),
+                          texte: 'Alertes a proximité',
+                          droite: _BadgeNombre(
+                            texte: toutes == null
+                                ? '...'
+                                : '$nombre ${nombre > 1 ? 'Alertes' : 'Alerte'}',
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        if (instantane.hasError)
+                          const _MessageVide(
+                            'Impossible de charger les alertes. '
+                            'Vérifiez votre connexion.',
+                          )
+                        else if (toutes == null)
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 30),
+                            child: Center(
+                              child: CircularProgressIndicator(
+                                color: Couleurs.rouge,
+                              ),
+                            ),
+                          )
+                        else if (proches.isEmpty)
+                          const _MessageVide(
+                            'Aucune alerte près de chez vous pour le moment.',
+                          )
+                        else
+                          for (final alerte in proches)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 18),
+                              child: _CarteAlerte(
+                                alerte: alerte,
+                                lieu: position.lieu,
+                                auAppui: () => _ouvrirDetails(alerte),
+                              ),
+                            ),
+                      ],
+                    );
+                  },
                 ),
-                const SizedBox(height: 20),
-                _CarteAlerte(
-                  couleur: Couleurs.rouge,
-                  icone: const IconeSirene(taille: 22),
-                  titre: 'Personne en detresse',
-                  auAppui: _ouvrirDetails,
-                ),
-                if (!_tuilesVisibles) ...[
-                  const SizedBox(height: 18),
-                  _CarteAlerte(
-                    couleur: Couleurs.orange,
-                    icone: const Icon(
-                      Icons.location_on,
-                      size: 22,
-                      color: Colors.white,
-                    ),
-                    titre: 'Objet perdu',
-                    auAppui: _ouvrirDetails,
-                  ),
-                ],
               ],
             ),
           ),
@@ -129,27 +207,69 @@ class _EnteteImage extends StatelessWidget {
   }
 }
 
+/// En-tête : le lieu où se trouve l'utilisateur. Si la position n'est pas
+/// disponible, le texte explique pourquoi et un appui permet de réessayer.
 class _Lieu extends StatelessWidget {
-  const _Lieu();
+  const _Lieu({required this.resultat, required this.auAppui});
+
+  /// Null tant que la position est en cours de recherche.
+  final ResultatLocalisation? resultat;
+  final VoidCallback? auAppui;
+
+  String _texte() {
+    final r = resultat;
+    if (r == null) return 'Localisation...';
+    switch (r.etat) {
+      case EtatLocalisation.ok:
+        return r.lieu?.libelle ?? 'Position inconnue';
+      case EtatLocalisation.serviceDesactive:
+        return 'Activez la localisation';
+      case EtatLocalisation.permissionRefusee:
+      case EtatLocalisation.permissionBloquee:
+        return 'Autorisez la localisation';
+      case EtatLocalisation.erreur:
+        return 'Position indisponible';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Icon(Icons.location_on, size: 36, color: Couleurs.rouge),
-        const SizedBox(width: 8),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Abidjan, Plateau', style: Styles.gras(22, Colors.white)),
-            Text(
-              'Restez informé, restez en securité',
-              style: Styles.gras(11.5, Colors.white, poids: FontWeight.w600),
+    final ok = resultat?.etat == EtatLocalisation.ok;
+    return GestureDetector(
+      onTap: auAppui,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.location_on, size: 36, color: Couleurs.rouge),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _texte(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Styles.gras(
+                    ok || resultat == null ? 22 : 17,
+                    Colors.white,
+                  ),
+                ),
+                Text(
+                  ok || resultat == null
+                      ? 'Restez informé, restez en securité'
+                      : 'Appuyez ici pour réessayer',
+                  style: Styles.gras(
+                    11.5,
+                    Colors.white,
+                    poids: FontWeight.w600,
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-      ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -299,22 +419,52 @@ class _TuileRaccourci extends StatelessWidget {
   }
 }
 
+/// Message simple quand il n'y a rien à montrer (liste vide, erreur).
+class _MessageVide extends StatelessWidget {
+  const _MessageVide(this.texte);
+
+  final String texte;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 34),
+      decoration: BoxDecoration(
+        color: Couleurs.grisFond,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Text(
+        texte,
+        textAlign: TextAlign.center,
+        style: Styles.gras(13, Couleurs.grisTexte, hauteur: 1.5),
+      ),
+    );
+  }
+}
+
 /// Carte d'une alerte proche : photo en haut, puis pastille, textes et flèche.
 class _CarteAlerte extends StatelessWidget {
   const _CarteAlerte({
-    required this.couleur,
-    required this.icone,
-    required this.titre,
+    required this.alerte,
+    required this.lieu,
     required this.auAppui,
   });
 
-  final Color couleur;
-  final Widget icone;
-  final String titre;
+  final Alerte alerte;
+
+  /// La position de l'utilisateur, pour calculer la distance.
+  final LieuActuel? lieu;
   final VoidCallback auAppui;
 
   @override
   Widget build(BuildContext context) {
+    final couleur = alerte.type.couleur;
+    final distance = alerte.distanceKm(lieu?.latitude, lieu?.longitude);
+    final details = distance == null
+        ? alerte.lieu
+        : '${alerte.lieu} • ${libelleDistance(distance)}';
+
     return GestureDetector(
       onTap: auAppui,
       child: Container(
@@ -326,18 +476,7 @@ class _CarteAlerte extends StatelessWidget {
         ),
         child: Column(
           children: [
-            // Emplacement de la photo de l'alerte (ajoutée plus tard).
-            Container(
-              height: 96,
-              width: double.infinity,
-              color: const Color(0xFFD8D2CC),
-              alignment: Alignment.center,
-              child: const Icon(
-                Icons.image_outlined,
-                size: 40,
-                color: Colors.white,
-              ),
-            ),
+            PhotoAlerte(photo: alerte.photo),
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 10, 12, 12),
               child: Row(
@@ -351,16 +490,23 @@ class _CarteAlerte extends StatelessWidget {
                       shape: BoxShape.circle,
                       boxShadow: Styles.ombre,
                     ),
-                    child: icone,
+                    child: alerte.type.icone(taille: 22),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(titre, style: Styles.gras(13, couleur)),
                         Text(
-                          'Treichville • 1.2 km',
+                          alerte.categorie,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Styles.gras(13, couleur),
+                        ),
+                        Text(
+                          details,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: Styles.gras(11.5, Colors.black),
                         ),
                         const SizedBox(height: 2),
@@ -373,7 +519,7 @@ class _CarteAlerte extends StatelessWidget {
                             ),
                             const SizedBox(width: 5),
                             Text(
-                              "Il y'a 15 min",
+                              tempsEcoule(alerte.creeLe),
                               style: Styles.gras(10, Couleurs.grisTexte),
                             ),
                           ],

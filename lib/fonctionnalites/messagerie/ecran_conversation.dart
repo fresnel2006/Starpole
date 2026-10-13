@@ -1,114 +1,148 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../application/couleurs.dart';
-import '../../partage/composants/avatar_personne.dart';
+import '../../noyau/format_temps.dart';
+import '../../noyau/messagerie.dart';
+import '../../noyau/service_messagerie.dart';
+import '../../partage/composants/avatar_utilisateur.dart';
+import '../../partage/composants/vibrant.dart';
 import '../../partage/styles.dart';
 
-/// Un message affiché dans une conversation.
-class MessageDemo {
-  const MessageDemo({
-    this.texte = '',
-    required this.envoye,
-    required this.heure,
-    this.avecCoeur = false,
-    this.localisation = false,
+/// Une conversation avec une autre personne : ses messages en direct, la zone
+/// pour écrire et l'envoi.
+class EcranConversation extends StatefulWidget {
+  const EcranConversation({
+    super.key,
+    required this.conversationId,
+    required this.autreId,
+    required this.autreNom,
   });
 
-  final String texte;
+  final String conversationId;
+  final String autreId;
+  final String autreNom;
 
-  /// Vrai si le message vient de moi (bulle rouge à droite).
-  final bool envoye;
-  final String heure;
-
-  /// Ajoute un petit coeur après le texte.
-  final bool avecCoeur;
-
-  /// Message de type « localisation » (vignette avec la photo du lieu).
-  final bool localisation;
+  @override
+  State<EcranConversation> createState() => _EcranConversationState();
 }
 
-/// Une personne avec qui l'on discute (données de démonstration).
-class ContactDemo {
-  const ContactDemo({
-    required this.nom,
-    required this.enLigne,
-    required this.couleurAvatar,
-    required this.messages,
-  });
-
-  final String nom;
-  final bool enLigne;
-  final Color couleurAvatar;
-  final List<MessageDemo> messages;
-
-  static const ContactDemo mariam = ContactDemo(
-    nom: 'Mariam',
-    enLigne: true,
-    couleurAvatar: Color(0xFFE7B7B7),
-    messages: [
-      MessageDemo(
-        texte:
-            'Bonjour, je peux vous vous aider.\nJ\'habite pas loin de votre\n'
-            'localisation',
-        envoye: false,
-        heure: '14:01',
-      ),
-      MessageDemo(
-        texte: 'Merci beaucoup !',
-        envoye: true,
-        heure: '14:02',
-        avecCoeur: true,
-      ),
-    ],
+class _EcranConversationState extends State<EcranConversation> {
+  late final ServiceMessagerie _service = context.read<ServiceMessagerie>();
+  late final Stream<List<Message>> _flux = _service.messages(
+    widget.conversationId,
   );
 
-  static const ContactDemo kouadio = ContactDemo(
-    nom: 'Kouadio Eliezer',
-    enLigne: true,
-    couleurAvatar: Color(0xFFBDBDBD),
-    messages: [
-      MessageDemo(
-        texte: 'Bonjour monsieur est ce que l\'urgence est toujours valable ?',
-        envoye: true,
-        heure: '14:02',
-      ),
-      MessageDemo(
-        texte: 'Oui oui je vous envois la localisation !',
-        envoye: false,
-        heure: '14:02',
-      ),
-      MessageDemo(envoye: false, heure: '14:03', localisation: true),
-    ],
-  );
-}
+  final TextEditingController _saisie = TextEditingController();
+  final GlobalKey<VibrantState> _cleSaisie = GlobalKey();
 
-/// Écran de conversation : en-tête, messages, zone de saisie et raccourcis.
-class EcranConversation extends StatelessWidget {
-  const EcranConversation({super.key, required this.contact});
+  /// Le dernier message que j'ai marqué comme lu (pour ne pas le refaire).
+  String? _dernierLu;
+  bool _envoiEnCours = false;
 
-  final ContactDemo contact;
+  @override
+  void initState() {
+    super.initState();
+    _service.marquerLu(widget.conversationId);
+  }
+
+  @override
+  void dispose() {
+    _saisie.dispose();
+    super.dispose();
+  }
+
+  void _afficherMessage(String texte) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(texte)));
+  }
+
+  /// Envoie le message écrit. S'il est vide, la zone vibre et clignote.
+  Future<void> _envoyer() async {
+    final texte = _saisie.text.trim();
+    if (texte.isEmpty) {
+      _cleSaisie.currentState?.signalerErreur();
+      return;
+    }
+    setState(() => _envoiEnCours = true);
+    try {
+      await _service.envoyerMessage(widget.conversationId, texte);
+      if (mounted) _saisie.clear();
+    } on ErreurMessagerie catch (e) {
+      if (mounted) _afficherMessage(e.message);
+    } finally {
+      if (mounted) setState(() => _envoiEnCours = false);
+    }
+  }
+
+  /// Quand l'autre personne écrit pendant que la conversation est ouverte, on
+  /// la marque comme lue.
+  void _marquerLuSiBesoin(List<Message> messages) {
+    if (messages.isEmpty) return;
+    final dernier = messages.last;
+    if (dernier.auteurId == _service.utilisateurId) return;
+    if (dernier.id == _dernierLu) return;
+    _dernierLu = dernier.id;
+    _service.marquerLu(widget.conversationId);
+  }
 
   @override
   Widget build(BuildContext context) {
+    final moi = _service.utilisateurId;
+
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
         child: Column(
           children: [
-            _Entete(contact: contact),
+            _Entete(autreId: widget.autreId, autreNom: widget.autreNom),
             Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(18, 22, 18, 12),
-                children: [
-                  for (final message in contact.messages)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 18),
-                      child: _Bulle(message: message),
+              child: StreamBuilder<List<Message>>(
+                stream: _flux,
+                builder: (context, instantane) {
+                  if (instantane.hasError) {
+                    return const _Centre(
+                      'Impossible de charger les messages. '
+                      'Vérifiez votre connexion.',
+                    );
+                  }
+                  final messages = instantane.data;
+                  if (messages == null) {
+                    return const Center(
+                      child: CircularProgressIndicator(color: Couleurs.rouge),
+                    );
+                  }
+                  WidgetsBinding.instance.addPostFrameCallback(
+                    (_) => _marquerLuSiBesoin(messages),
+                  );
+                  if (messages.isEmpty) {
+                    return _Centre('Dites bonjour à ${widget.autreNom}.');
+                  }
+                  // La liste est « à l'envers » : le dernier message est en bas
+                  // et reste visible quand il arrive.
+                  final inverses = messages.reversed.toList();
+                  return ListView.builder(
+                    reverse: true,
+                    padding: const EdgeInsets.fromLTRB(18, 18, 18, 8),
+                    itemCount: inverses.length,
+                    itemBuilder: (context, i) => Padding(
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: _Bulle(
+                        message: inverses[i],
+                        envoye: inverses[i].auteurId == moi,
+                      ),
                     ),
-                ],
+                  );
+                },
               ),
             ),
-            const _ZoneSaisie(),
+            _ZoneSaisie(
+              controleur: _saisie,
+              cle: _cleSaisie,
+              envoiEnCours: _envoiEnCours,
+              envoyer: _envoyer,
+            ),
           ],
         ),
       ),
@@ -116,10 +150,31 @@ class EcranConversation extends StatelessWidget {
   }
 }
 
-class _Entete extends StatelessWidget {
-  const _Entete({required this.contact});
+class _Centre extends StatelessWidget {
+  const _Centre(this.texte);
 
-  final ContactDemo contact;
+  final String texte;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 36),
+        child: Text(
+          texte,
+          textAlign: TextAlign.center,
+          style: Styles.gras(13, Couleurs.grisTexte, hauteur: 1.5),
+        ),
+      ),
+    );
+  }
+}
+
+class _Entete extends StatelessWidget {
+  const _Entete({required this.autreId, required this.autreNom});
+
+  final String autreId;
+  final String autreNom;
 
   @override
   Widget build(BuildContext context) {
@@ -146,21 +201,14 @@ class _Entete extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 6),
-          AvatarPersonne(taille: 46, couleurFond: contact.couleurAvatar),
+          AvatarUtilisateur(id: autreId, taille: 46),
           const SizedBox(width: 12),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  contact.nom,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Styles.gras(14.5, Colors.black),
-                ),
-                if (contact.enLigne)
-                  Text('En ligne', style: Styles.gras(12, Couleurs.rouge)),
-              ],
+            child: Text(
+              autreNom,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Styles.gras(15, Colors.black),
             ),
           ),
           const Icon(
@@ -179,68 +227,45 @@ class _Entete extends StatelessWidget {
 }
 
 class _Bulle extends StatelessWidget {
-  const _Bulle({required this.message});
+  const _Bulle({required this.message, required this.envoye});
 
-  final MessageDemo message;
+  final Message message;
+  final bool envoye;
 
   @override
   Widget build(BuildContext context) {
-    final largeurMax = MediaQuery.sizeOf(context).width * 0.66;
-    final couleurTexte = message.envoye ? Colors.white : Colors.black;
-    final couleurHeure = message.envoye
+    final largeurMax = MediaQuery.sizeOf(context).width * 0.72;
+    final couleurTexte = envoye ? Colors.white : Colors.black;
+    final couleurHeure = envoye
         ? const Color(0xCCFFFFFF)
         : Couleurs.grisIndication;
 
-    final contenu = message.localisation
-        ? const _VignetteLocalisation()
-        : Text.rich(
-            TextSpan(
-              style: Styles.gras(12.5, couleurTexte, hauteur: 1.5),
-              children: [
-                TextSpan(text: message.texte),
-                if (message.avecCoeur) ...[
-                  const TextSpan(text: ' '),
-                  const WidgetSpan(
-                    alignment: PlaceholderAlignment.middle,
-                    child: Icon(
-                      Icons.favorite,
-                      size: 16,
-                      color: Color(0xFFFFB300),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          );
-
     return Align(
-      alignment: message.envoye ? Alignment.centerRight : Alignment.centerLeft,
+      alignment: envoye ? Alignment.centerRight : Alignment.centerLeft,
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: largeurMax),
         child: Container(
-          padding: message.localisation
-              ? EdgeInsets.zero
-              : const EdgeInsets.fromLTRB(14, 10, 14, 8),
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
           decoration: BoxDecoration(
-            color: message.envoye
-                ? Couleurs.rouge
-                : (message.localisation
-                      ? Colors.transparent
-                      : const Color(0xFFF1F6F4)),
+            color: envoye ? Couleurs.rouge : const Color(0xFFF1F6F4),
             borderRadius: BorderRadius.circular(14),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Align(alignment: Alignment.centerLeft, child: contenu),
-              if (!message.localisation) ...[
-                const SizedBox(height: 4),
-                Text(
-                  message.heure,
-                  style: Styles.gras(9, couleurHeure, poids: FontWeight.w500),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  message.texte,
+                  style: Styles.gras(12.5, couleurTexte, hauteur: 1.5),
                 ),
-              ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                heureCourte(message.creeLe),
+                style: Styles.gras(9, couleurHeure, poids: FontWeight.w500),
+              ),
             ],
           ),
         ),
@@ -249,51 +274,19 @@ class _Bulle extends StatelessWidget {
   }
 }
 
-/// Vignette « Localisation » : la photo du lieu et son étiquette.
-class _VignetteLocalisation extends StatelessWidget {
-  const _VignetteLocalisation();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: Styles.ombre,
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            height: 96,
-            color: const Color(0xFFD8D2CC),
-            alignment: Alignment.center,
-            child: const Icon(
-              Icons.image_outlined,
-              size: 36,
-              color: Colors.white,
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            child: Row(
-              children: [
-                const Icon(Icons.location_on, size: 16, color: Colors.black),
-                const SizedBox(width: 5),
-                Text('Localisation', style: Styles.gras(10.5, Colors.black)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 /// Zone du bas : champ de saisie, bouton d'envoi et deux raccourcis.
 class _ZoneSaisie extends StatelessWidget {
-  const _ZoneSaisie();
+  const _ZoneSaisie({
+    required this.controleur,
+    required this.cle,
+    required this.envoiEnCours,
+    required this.envoyer,
+  });
+
+  final TextEditingController controleur;
+  final GlobalKey<VibrantState> cle;
+  final bool envoiEnCours;
+  final VoidCallback envoyer;
 
   @override
   Widget build(BuildContext context) {
@@ -305,51 +298,80 @@ class _ZoneSaisie extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: Container(
-                  height: 44,
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(22),
-                    border: Border.all(color: Couleurs.grisBordure),
-                    boxShadow: Styles.ombre,
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.sentiment_satisfied_alt,
-                        size: 24,
-                        color: Color(0xFFFFB300),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: TextField(
-                          style: Styles.gras(12, Colors.black),
-                          decoration: InputDecoration(
-                            hintText: 'Ecrivez un message...',
-                            hintStyle: Styles.gras(
-                              11.5,
-                              Couleurs.grisIndication,
+                child: Vibrant(
+                  key: cle,
+                  rayon: 22,
+                  child: Container(
+                    height: 44,
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(22),
+                      border: Border.all(color: Couleurs.grisBordure),
+                      boxShadow: Styles.ombre,
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.sentiment_satisfied_alt,
+                          size: 24,
+                          color: Color(0xFFFFB300),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextField(
+                            controller: controleur,
+                            maxLength: 1000,
+                            textInputAction: TextInputAction.send,
+                            onSubmitted: (_) => envoyer(),
+                            buildCounter: (
+                              _, {
+                              required currentLength,
+                              required isFocused,
+                              maxLength,
+                            }) => null,
+                            style: Styles.gras(12, Colors.black),
+                            decoration: InputDecoration(
+                              hintText: 'Ecrivez un message...',
+                              hintStyle: Styles.gras(
+                                11.5,
+                                Couleurs.grisIndication,
+                              ),
+                              border: InputBorder.none,
+                              isDense: true,
                             ),
-                            border: InputBorder.none,
-                            isDense: true,
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
               const SizedBox(width: 10),
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: Couleurs.rouge,
-                  shape: BoxShape.circle,
-                  boxShadow: Styles.ombre,
+              Semantics(
+                button: true,
+                label: 'Envoyer le message',
+                child: GestureDetector(
+                  onTap: envoiEnCours ? null : envoyer,
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: Couleurs.rouge,
+                      shape: BoxShape.circle,
+                      boxShadow: Styles.ombre,
+                    ),
+                    child: envoiEnCours
+                        ? const Padding(
+                            padding: EdgeInsets.all(11),
+                            child: CircularProgressIndicator(
+                              strokeWidth: 3,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.send, size: 22, color: Colors.white),
+                  ),
                 ),
-                child: const Icon(Icons.send, size: 22, color: Colors.white),
               ),
             ],
           ),

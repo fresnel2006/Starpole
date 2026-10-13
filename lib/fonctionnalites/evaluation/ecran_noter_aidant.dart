@@ -1,14 +1,36 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../application/couleurs.dart';
+import '../../noyau/service_alertes.dart';
 import '../../partage/composants/avatar_personne.dart';
 import '../../partage/composants/entete_retour.dart';
 import '../../partage/composants/puce.dart';
 import '../../partage/styles.dart';
 
-/// Note donnée à la personne qui a aidé : étoiles, commentaire et étiquettes.
+/// Note donnée à l'autre personne d'une alerte : étoiles, commentaire et
+/// étiquettes. Elle est enregistrée dans la base à l'envoi.
 class EcranNoterAidant extends StatefulWidget {
-  const EcranNoterAidant({super.key});
+  const EcranNoterAidant({
+    super.key,
+    required this.alerteId,
+    required this.personneId,
+    required this.personneNom,
+    this.titre = "Noter l'aidant",
+    this.role = 'Citoyen benevol',
+  });
+
+  final String alerteId;
+
+  /// La personne notée.
+  final String personneId;
+  final String personneNom;
+
+  /// Le titre de l'écran (« Noter l'aidant » ou « Noter l'auteur »).
+  final String titre;
+
+  /// Le texte sous le nom (« Citoyen benevol », « Auteur de l'alerte »).
+  final String role;
 
   @override
   State<EcranNoterAidant> createState() => _EcranNoterAidantState();
@@ -16,16 +38,48 @@ class EcranNoterAidant extends StatefulWidget {
 
 class _EcranNoterAidantState extends State<EcranNoterAidant> {
   static const int _longueurMax = 200;
+  static const List<String> _etiquettes = [
+    'Efficace',
+    'Rapide',
+    'mechant',
+    'cool',
+  ];
 
-  final TextEditingController _commentaire = TextEditingController(
-    text: 'Il a ete tres rapide et tres gentil',
-  );
+  final TextEditingController _commentaire = TextEditingController();
+  final Set<String> _etiquettesChoisies = {};
   int _etoiles = 5;
+  bool _enCours = false;
 
   @override
   void dispose() {
     _commentaire.dispose();
     super.dispose();
+  }
+
+  void _afficherMessage(String texte) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(texte)));
+  }
+
+  Future<void> _envoyer() async {
+    final service = context.read<ServiceAlertes>();
+    setState(() => _enCours = true);
+    try {
+      await service.noter(
+        alerteId: widget.alerteId,
+        pourId: widget.personneId,
+        etoiles: _etoiles,
+        commentaire: _commentaire.text,
+        etiquettes: _etiquettesChoisies.toList(),
+      );
+      // La note est envoyée : on revient à l'écran principal.
+      if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
+    } on ErreurAlerte catch (e) {
+      if (mounted) _afficherMessage(e.message);
+    } finally {
+      if (mounted) setState(() => _enCours = false);
+    }
   }
 
   @override
@@ -38,25 +92,28 @@ class _EcranNoterAidantState extends State<EcranNoterAidant> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const EnteteRetour(titre: "Noter l'aidant", tailleTitre: 22),
+              EnteteRetour(titre: widget.titre, tailleTitre: 22),
               const SizedBox(height: 18),
               Row(
                 children: [
-                  const AvatarPersonne(
-                    taille: 100,
-                    couleurFond: Color(0xFFD9A58B),
-                    avecOmbre: true,
-                  ),
+                  const AvatarPersonne(taille: 100, avecOmbre: true),
                   const SizedBox(width: 18),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Kouadio', style: Styles.gras(22.7, Colors.black)),
-                      Text(
-                        'Citoyen benevol',
-                        style: Styles.gras(16.5, Couleurs.grisIndication),
-                      ),
-                    ],
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.personneNom,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: Styles.gras(22.7, Colors.black),
+                        ),
+                        Text(
+                          widget.role,
+                          style: Styles.gras(16.5, Couleurs.grisIndication),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -115,7 +172,9 @@ class _EcranNoterAidantState extends State<EcranNoterAidant> {
                   onChanged: (_) => setState(() {}),
                   textAlignVertical: TextAlignVertical.top,
                   style: Styles.gras(15.7, Colors.black),
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
+                    hintText: 'Ecrivez un commentaire...',
+                    hintStyle: Styles.gras(14, Couleurs.grisIndication),
                     border: InputBorder.none,
                     isDense: true,
                   ),
@@ -137,19 +196,27 @@ class _EcranNoterAidantState extends State<EcranNoterAidant> {
                 style: Styles.gras(16.3, Colors.black),
               ),
               const SizedBox(height: 12),
-              const Wrap(
+              Wrap(
                 spacing: 10,
                 runSpacing: 10,
                 children: [
-                  _Etiquette('Efficace'),
-                  _Etiquette('Rapide'),
-                  _Etiquette('mechant'),
-                  _Etiquette('cool'),
+                  for (final etiquette in _etiquettes)
+                    GestureDetector(
+                      onTap: () => setState(() {
+                        if (!_etiquettesChoisies.remove(etiquette)) {
+                          _etiquettesChoisies.add(etiquette);
+                        }
+                      }),
+                      child: _Etiquette(
+                        etiquette,
+                        choisie: _etiquettesChoisies.contains(etiquette),
+                      ),
+                    ),
                 ],
               ),
               const SizedBox(height: 28),
               GestureDetector(
-                onTap: () => Navigator.of(context).maybePop(),
+                onTap: _enCours ? null : _envoyer,
                 child: Container(
                   height: 44,
                   alignment: Alignment.center,
@@ -158,10 +225,16 @@ class _EcranNoterAidantState extends State<EcranNoterAidant> {
                     borderRadius: BorderRadius.circular(22),
                     boxShadow: Styles.ombre,
                   ),
-                  child: Text(
-                    'Envoyer',
-                    style: Styles.gras(15.5, Colors.white),
-                  ),
+                  child: _enCours
+                      ? const SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 3,
+                            color: Colors.white,
+                          ),
+                        )
+                      : Text('Envoyer', style: Styles.gras(15.5, Colors.white)),
                 ),
               ),
             ],
@@ -172,17 +245,19 @@ class _EcranNoterAidantState extends State<EcranNoterAidant> {
   }
 }
 
+/// Étiquette à cocher : rose quand elle est libre, rouge quand elle est choisie.
 class _Etiquette extends StatelessWidget {
-  const _Etiquette(this.texte);
+  const _Etiquette(this.texte, {required this.choisie});
 
   final String texte;
+  final bool choisie;
 
   @override
   Widget build(BuildContext context) {
     return Puce(
       texte: texte,
-      fond: const Color(0xFFF8CFCF),
-      couleurTexte: Couleurs.rouge,
+      fond: choisie ? Couleurs.rouge : const Color(0xFFF8CFCF),
+      couleurTexte: choisie ? Colors.white : Couleurs.rouge,
       taille: 12.3,
       ombre: true,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import 'package:provider/provider.dart';
+
+import '../../noyau/service_auth.dart';
 import '../../partage/composants/barre_navigation.dart';
 import '../accueil/ecran_accueil.dart';
 import '../alertes/bandeau_alerte_en_cours.dart';
@@ -19,6 +22,14 @@ class EcranPrincipal extends StatefulWidget {
 
 class _EcranPrincipalState extends State<EcranPrincipal> {
   int _index = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    // Rend ce compte recherchable par son numéro et son e-mail (utile pour
+    // les comptes créés avant l'ajout de contacts).
+    context.read<ServiceAuth>().assurerRecherchable();
+  }
 
   Widget _onglet() {
     switch (_index) {

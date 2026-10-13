@@ -115,15 +115,23 @@ Règles de style à ne jamais enfreindre :
 
 ## 8. État actuel
 
-Écrans faits (maquettes de Fresnel, textes en français, Poppins, widgets `Stack`, `Column`, `Container` et `color`) :
-- Infos de départ (3 pages), Inscription, Connexion (avec le logo `assets/images/Starpole logo.png`).
-- Accueil (en-tête photo, bouton Catégories qui affiche les 3 tuiles, alertes en cartes avec photo), Carte (flutter_map et OpenStreetMap), Poster une alerte, Messagerie, Profil, avec la barre de navigation du bas (`EcranPrincipal`).
-- Détails de l'alerte, Suivi de l'alerte (timeline), Conversation (Mariam et Kouadio), Mes alertes aides et dons, Noter l'aidant.
+Écrans faits d'après les maquettes de Fresnel (textes en français, Poppins, widgets `Stack`, `Column`, `Container` et `color`) : infos de départ, inscription, connexion (logo `assets/images/Starpole logo.png`), accueil, carte, poster une alerte, messagerie, profil, détails de l'alerte, suivi (timeline), conversation, mes alertes, noter l'aidant.
 
-Alerte en cours : « Je peux aider » accepte l'alerte (état partagé avec Provider dans `lib/noyau/alerte_en_cours.dart`). Un bandeau rouge « Alerte en cours » s'affiche alors au-dessus de la barre du bas sur tous les onglets et ouvre le suivi ; « Terminé » et « Stopper » le font disparaître. Gestion d'état choisie : Provider.
+**Données réelles (Firebase, projet `starpole-3d84d`, zone Paris)**
+- Comptes : e-mail et mot de passe, et Google (`google_sign_in`). Service : `lib/noyau/service_auth.dart`.
+- Profil : collection `utilisateurs` (nom, téléphone, e-mail, photo en base64). Photo de profil modifiable (caméra ou galerie).
+- Position : `lib/noyau/service_localisation.dart` (geolocator et geocoding), quartier d'Abidjan le plus proche avec `lib/noyau/quartiers.dart`, mémorisée dans `PositionUtilisateur`.
+- Photos : `lib/noyau/traitement_photo.dart` redresse la photo (orientation du téléphone), la coupe autour de son centre (carré 400 px pour le profil, rectangle 2 pour 1 de 640 px pour une alerte) et l'enregistre en JPEG léger (paquet `image`). Ce qui est enregistré est exactement ce qui est affiché.
+- Alertes : collection `alertes` (urgence, don, service). Service : `lib/noyau/service_alertes.dart`. Poster une alerte enregistre vraiment ; l'accueil, la carte, « Mes alertes » et le suivi lisent la base en direct ; « Je peux aider », « Terminé » et « Stopper » mettent l'alerte à jour ; le bandeau « Alerte en cours » vient de la base.
+- Progression : sous-collection `alertes/{id}/progression` (messages d'avancement, « Je suis en route »). L'auteur et la personne qui aide les écrivent depuis le suivi, et ils s'affichent dans la timeline en direct.
+- Contacts et messagerie : service `lib/noyau/service_messagerie.dart`. On ajoute un contact en tapant son numéro de téléphone ou son e-mail (champs `telephoneNormalise` et `emailNormalise` du profil, voir `lib/noyau/normalisation.dart`) ; ses contacts sont dans `utilisateurs/{uid}/contacts`. Les conversations sont dans `conversations/{uidA_uidB}` (identifiants triés) avec une sous-collection `messages`. Un repère « non lu » se base sur le champ `lu` de la conversation. La recherche d'un profil est limitée à 5 résultats par les règles (on ne peut pas télécharger tous les profils).
+- Notes : collection `avis` (étoiles, commentaire, étiquettes) ; le profil affiche les vrais chiffres et la note moyenne.
+- Règles de sécurité : `firestore.rules` ; index : `firestore.indexes.json`. Déploiement : `firebase deploy --only firestore:rules,firestore:indexes --project starpole-3d84d`.
+- Les clés (`firebase_options.dart`, `google-services.json`) sont dans le `.gitignore` : `flutterfire configure --project=starpole-3d84d` les recrée.
+- La Realtime Database créée au départ n'est pas utilisée. Firebase Storage n'est pas utilisé (forfait payant) : les photos sont réduites et enregistrées dans Firestore.
+- État : Provider. Les écrans utilisent des services (`ServiceAuth`, `ServiceAlertes`, `ServicePhoto`, `ServiceLocalisation`) remplacés par de faux services dans `test/widget_test.dart`.
 
-Navigation : « C'est parti ! » ouvre Inscription, qui mène à Connexion ; « Se connecter » et « S'inscrire » ouvrent l'accueil (sans vérification pour l'instant).
-
-Pas encore fait : base de données (Firebase), API, vraies données (tout est de la démonstration), photos et avatars (des emplacements gris les remplacent), boutons sans action (Partager, Google, filtre de la carte...).
-
-Prochaine étape annoncée par Fresnel : la base de données et les différentes API.
+**Pas encore fait**
+- Messagerie : pas encore de groupes, d'envoi de photo ou de position, de présence « en ligne », ni de notifications quand un message arrive.
+- Les boutons d'appel et de vidéo de la conversation, et les raccourcis « Localisation » et « Photo », ne font rien.
+- Photos des avatars des autres personnes, bouton Partager, notifications push (FastAPI), connexion par numéro de téléphone, « Mot de passe oublié ? », filtre de la carte.

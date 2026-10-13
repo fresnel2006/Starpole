@@ -46,3 +46,8 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Firebase : configuration générée par FlutterFire (ne pas mettre dans Git).
+# Pour la recréer : flutterfire configure --project=starpole-3d84d
+/lib/firebase_options.dart
+/android/app/google-services.json
