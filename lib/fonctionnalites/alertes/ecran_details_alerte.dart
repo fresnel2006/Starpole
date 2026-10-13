@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../application/couleurs.dart';
+import '../../noyau/alerte_en_cours.dart';
 import '../../partage/composants/avatar_personne.dart';
 import '../../partage/composants/entete_retour.dart';
 import '../../partage/composants/puce.dart';
 import '../../partage/styles.dart';
-import '../messagerie/ecran_conversation.dart';
+import 'ecran_suivi_alerte.dart';
 
 /// Détails d'une alerte : description, photo, lieu, et les boutons d'aide.
 class EcranDetailsAlerte extends StatelessWidget {
@@ -106,12 +108,22 @@ class EcranDetailsAlerte extends StatelessWidget {
                 icone: Icons.handshake_outlined,
                 fond: Couleurs.vert,
                 couleurTexte: Colors.white,
-                auAppui: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) =>
-                        const EcranConversation(contact: ContactDemo.kouadio),
-                  ),
-                ),
+                auAppui: () {
+                  // L'alerte est acceptée : le bandeau « Alerte en cours »
+                  // s'affiche ensuite sur tous les onglets.
+                  context.read<AlerteEnCoursNotifier>().accepter(
+                    const AlerteEnCours(
+                      titre: 'Personne en detresse',
+                      lieu: 'Treichville',
+                    ),
+                  );
+                  // On passe directement au détail de l'alerte acceptée.
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const EcranSuiviAlerte(),
+                    ),
+                  );
+                },
               ),
               const SizedBox(height: 14),
               const _BoutonAction(

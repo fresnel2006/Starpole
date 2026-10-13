@@ -21,6 +21,13 @@ Future<void> chargerPoppins() async {
   await chargeur.load();
 }
 
+/// Avance le temps de l'animation d'un changement d'écran. On n'utilise pas
+/// pumpAndSettle tant que le bandeau est visible : son point clignote sans fin.
+Future<void> avancer(WidgetTester tester) async {
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 600));
+}
+
 void main() {
   testWidgets("Du début de l'appli jusqu'à l'accueil et ses onglets", (
     tester,
@@ -52,6 +59,33 @@ void main() {
 
     // S'inscrire ouvre l'accueil.
     await tester.tap(find.text("S'inscrire").last);
+    await tester.pumpAndSettle();
+    expect(find.text('Abidjan, Plateau'), findsOneWidget);
+
+    // Accepter une alerte : le bandeau « Alerte en cours » apparaît partout.
+    expect(find.text('Alerte en cours'), findsNothing);
+    await tester.tap(find.text('Personne en detresse').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Je peux aider'));
+    await avancer(tester);
+    // « Je peux aider » ouvre directement le détail de l'alerte acceptée.
+    expect(find.text('Timeline'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.chevron_left)); // retour aux détails
+    await avancer(tester);
+    await tester.tap(find.byIcon(Icons.chevron_left)); // retour à l'accueil
+    await avancer(tester);
+    expect(find.text('Alerte en cours'), findsOneWidget);
+
+    // Le bandeau ouvre le suivi, et « Stopper » le fait disparaître.
+    await tester.tap(find.text('Alerte en cours'));
+    await avancer(tester);
+    expect(find.text('Timeline'), findsOneWidget);
+    await tester.tap(find.text('Stopper'));
+    await tester.pumpAndSettle();
+    // « Stopper » (comme « Terminé ») ouvre la note de l'aidant.
+    expect(find.text("Noter l'aidant"), findsOneWidget);
+    expect(find.text('Alerte en cours'), findsNothing);
+    await tester.tap(find.text('Envoyer'));
     await tester.pumpAndSettle();
     expect(find.text('Abidjan, Plateau'), findsOneWidget);
 

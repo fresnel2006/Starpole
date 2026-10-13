@@ -15,6 +15,10 @@ abstract final class Couleurs {
   static const Color orange = Color(0xFFF08A00);
   static const Color bleu = Color(0xFF00AEFF);
 
+  /// Vert vif du badge « 2 Alertes » et rose-rouge du bouton « Catégories ».
+  static const Color vertVif = Color(0xFF1FA84A);
+  static const Color rougeRose = Color(0xFFF5174B);
+
   static const Color grisTexte = Color(0xFF555555);
   static const Color grisIndication = Color(0xFF8E8E8E);
   static const Color grisBordure = Color(0xFFE2E2E2);

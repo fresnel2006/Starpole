@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../../application/couleurs.dart';
+import '../../noyau/alerte_en_cours.dart';
 import '../../partage/composants/avatar_personne.dart';
 import '../../partage/composants/entete_retour.dart';
 import '../../partage/composants/icone_sirene.dart';
@@ -212,6 +214,16 @@ class _EtapeTimeline extends StatelessWidget {
   }
 }
 
+/// Termine l'alerte (le bandeau disparaît), puis ouvre « Noter l'aidant ».
+/// C'est la même chose pour « Terminé » et « Stopper ». On remplace cet écran
+/// par celui de la note : après « Envoyer », on revient où l'on était avant.
+void _terminerEtNoter(BuildContext context) {
+  context.read<AlerteEnCoursNotifier>().terminer();
+  Navigator.of(context).pushReplacement(
+    MaterialPageRoute<void>(builder: (_) => const EcranNoterAidant()),
+  );
+}
+
 /// Bas de page : champ de saisie et boutons Terminé / Stopper.
 class _BasDePage extends StatelessWidget {
   const _BasDePage();
@@ -278,11 +290,7 @@ class _BasDePage extends StatelessWidget {
           Row(
             children: [
               GestureDetector(
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => const EcranNoterAidant(),
-                  ),
-                ),
+                onTap: () => _terminerEtNoter(context),
                 child: const Puce(
                   texte: 'Terminé',
                   fond: Couleurs.rouge,
@@ -294,7 +302,7 @@ class _BasDePage extends StatelessWidget {
               ),
               const SizedBox(width: 14),
               GestureDetector(
-                onTap: () => Navigator.of(context).maybePop(),
+                onTap: () => _terminerEtNoter(context),
                 child: const Puce(
                   texte: 'Stopper',
                   fond: Colors.white,

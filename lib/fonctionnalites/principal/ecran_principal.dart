@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../partage/composants/barre_navigation.dart';
 import '../accueil/ecran_accueil.dart';
+import '../alertes/bandeau_alerte_en_cours.dart';
 import '../carte/ecran_carte.dart';
 import '../messagerie/ecran_messagerie.dart';
 import '../poster_alerte/ecran_poster_alerte.dart';
@@ -38,7 +39,19 @@ class _EcranPrincipalState extends State<EcranPrincipal> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
-      body: _onglet(),
+      body: Stack(
+        children: [
+          Positioned.fill(child: _onglet()),
+          // Bandeau « Alerte en cours », au-dessus de la barre du bas (le
+          // gros bouton + dépasse un peu, d'où la marge).
+          const Positioned(
+            left: 14,
+            right: 14,
+            bottom: 26,
+            child: BandeauAlerteEnCours(),
+          ),
+        ],
+      ),
       bottomNavigationBar: BarreNavigation(
         indexActif: _index,
         auChoix: (i) => setState(() => _index = i),

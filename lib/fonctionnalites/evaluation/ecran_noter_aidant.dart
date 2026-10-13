@@ -34,16 +34,16 @@ class _EcranNoterAidantState extends State<EcranNoterAidant> {
       backgroundColor: Colors.white,
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          padding: const EdgeInsets.fromLTRB(34, 8, 32, 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const EnteteRetour(titre: "Noter l'aidant"),
+              const EnteteRetour(titre: "Noter l'aidant", tailleTitre: 22),
               const SizedBox(height: 18),
               Row(
                 children: [
                   const AvatarPersonne(
-                    taille: 84,
+                    taille: 100,
                     couleurFond: Color(0xFFD9A58B),
                     avecOmbre: true,
                   ),
@@ -51,10 +51,10 @@ class _EcranNoterAidantState extends State<EcranNoterAidant> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Kouadio', style: Styles.gras(18, Colors.black)),
+                      Text('Kouadio', style: Styles.gras(22.7, Colors.black)),
                       Text(
                         'Citoyen benevol',
-                        style: Styles.gras(12.5, Couleurs.grisIndication),
+                        style: Styles.gras(16.5, Couleurs.grisIndication),
                       ),
                     ],
                   ),
@@ -64,7 +64,7 @@ class _EcranNoterAidantState extends State<EcranNoterAidant> {
               Text(
                 "Comment s'est passé\nl'aide ?",
                 style: Styles.gras(
-                  15.5,
+                  20,
                   Colors.black,
                   hauteur: 1.4,
                   poids: FontWeight.w500,
@@ -79,10 +79,10 @@ class _EcranNoterAidantState extends State<EcranNoterAidant> {
                       GestureDetector(
                         onTap: () => setState(() => _etoiles = i),
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          padding: const EdgeInsets.symmetric(horizontal: 2),
                           child: Icon(
                             Icons.star,
-                            size: 46,
+                            size: 40,
                             color: i <= _etoiles
                                 ? const Color(0xFFFFB800)
                                 : Couleurs.grisBordure,
@@ -94,54 +94,51 @@ class _EcranNoterAidantState extends State<EcranNoterAidant> {
               ),
               const SizedBox(height: 22),
               Container(
-                height: 120,
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+                height: 124,
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
                 decoration: BoxDecoration(
                   color: Couleurs.grisFond,
                   borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: Couleurs.grisBordure),
+                  boxShadow: Styles.ombre,
                 ),
-                child: Column(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _commentaire,
-                        maxLines: null,
-                        expands: true,
-                        maxLength: _longueurMax,
-                        buildCounter: (
-                          _, {
-                          required currentLength,
-                          required isFocused,
-                          maxLength,
-                        }) => null,
-                        onChanged: (_) => setState(() {}),
-                        textAlignVertical: TextAlignVertical.top,
-                        style: Styles.gras(13, Colors.black),
-                        decoration: const InputDecoration(
-                          border: InputBorder.none,
-                          isDense: true,
-                        ),
-                      ),
-                    ),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: Text(
-                        '${_commentaire.text.length}/$_longueurMax',
-                        style: Styles.gras(10.5, Couleurs.grisTexte),
-                      ),
-                    ),
-                  ],
+                child: TextField(
+                  controller: _commentaire,
+                  maxLines: null,
+                  expands: true,
+                  maxLength: _longueurMax,
+                  buildCounter: (
+                    _, {
+                    required currentLength,
+                    required isFocused,
+                    maxLength,
+                  }) => null,
+                  onChanged: (_) => setState(() {}),
+                  textAlignVertical: TextAlignVertical.top,
+                  style: Styles.gras(15.7, Colors.black),
+                  decoration: const InputDecoration(
+                    border: InputBorder.none,
+                    isDense: true,
+                  ),
+                ),
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    '${_commentaire.text.length}/$_longueurMax',
+                    style: Styles.gras(12.5, Couleurs.grisTexte),
+                  ),
                 ),
               ),
               const SizedBox(height: 22),
               Text(
                 'Ajouter un commentaire (optionel)',
-                style: Styles.gras(12.5, Colors.black),
+                style: Styles.gras(16.3, Colors.black),
               ),
               const SizedBox(height: 12),
               const Wrap(
-                spacing: 12,
+                spacing: 10,
                 runSpacing: 10,
                 children: [
                   _Etiquette('Efficace'),
@@ -154,14 +151,17 @@ class _EcranNoterAidantState extends State<EcranNoterAidant> {
               GestureDetector(
                 onTap: () => Navigator.of(context).maybePop(),
                 child: Container(
-                  height: 50,
+                  height: 44,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
                     color: Couleurs.rouge,
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(22),
                     boxShadow: Styles.ombre,
                   ),
-                  child: Text('Envoyer', style: Styles.gras(15, Colors.white)),
+                  child: Text(
+                    'Envoyer',
+                    style: Styles.gras(15.5, Colors.white),
+                  ),
                 ),
               ),
             ],
@@ -183,9 +183,9 @@ class _Etiquette extends StatelessWidget {
       texte: texte,
       fond: const Color(0xFFF8CFCF),
       couleurTexte: Couleurs.rouge,
-      taille: 10.5,
+      taille: 12.3,
       ombre: true,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
     );
   }
 }

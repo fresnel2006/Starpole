@@ -117,8 +117,10 @@ Règles de style à ne jamais enfreindre :
 
 Écrans faits (maquettes de Fresnel, textes en français, Poppins, widgets `Stack`, `Column`, `Container` et `color`) :
 - Infos de départ (3 pages), Inscription, Connexion (avec le logo `assets/images/Starpole logo.png`).
-- Accueil, Carte (flutter_map et OpenStreetMap), Poster une alerte, Messagerie, Profil, avec la barre de navigation du bas (`EcranPrincipal`).
+- Accueil (en-tête photo, bouton Catégories qui affiche les 3 tuiles, alertes en cartes avec photo), Carte (flutter_map et OpenStreetMap), Poster une alerte, Messagerie, Profil, avec la barre de navigation du bas (`EcranPrincipal`).
 - Détails de l'alerte, Suivi de l'alerte (timeline), Conversation (Mariam et Kouadio), Mes alertes aides et dons, Noter l'aidant.
+
+Alerte en cours : « Je peux aider » accepte l'alerte (état partagé avec Provider dans `lib/noyau/alerte_en_cours.dart`). Un bandeau rouge « Alerte en cours » s'affiche alors au-dessus de la barre du bas sur tous les onglets et ouvre le suivi ; « Terminé » et « Stopper » le font disparaître. Gestion d'état choisie : Provider.
 
 Navigation : « C'est parti ! » ouvre Inscription, qui mène à Connexion ; « Se connecter » et « S'inscrire » ouvrent l'accueil (sans vérification pour l'instant).
 

@@ -89,7 +89,7 @@ class EcranPosterAlerte extends StatelessWidget {
               height: 56,
               padding: const EdgeInsets.symmetric(horizontal: 18),
               decoration: BoxDecoration(
-                color: Couleurs.grisFond,
+                color: Colors.white,
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(color: Couleurs.grisBordure),
                 boxShadow: Styles.ombre,
