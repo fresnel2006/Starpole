@@ -49,16 +49,13 @@ abstract class ServiceAuth {
   /// Vrai si quelqu'un est déjà connecté (la session est gardée par Firebase).
   bool get estConnecte;
 
-  /// Crée un compte avec un e-mail et un mot de passe, puis enregistre le
-  /// profil (nom, téléphone, e-mail) dans Firestore.
-  Future<void> inscrire({
-    required String nom,
-    required String telephone,
-    required String email,
-    required String motDePasse,
-  });
+  /// Crée un compte avec un e-mail ou un numéro de téléphone (mode
+  /// démonstration, voir [IdentifiantCompte]), puis enregistre le profil dans
+  /// Firestore.
+  Future<void> inscrire({required String nom, required String identifiant});
 
-  Future<void> connecter({required String email, required String motDePasse});
+  /// Connexion avec un e-mail ou un numéro de téléphone.
+  Future<void> connecter({required String identifiant});
 
   Future<void> deconnecter();
 
@@ -76,6 +73,10 @@ abstract class ServiceAuth {
 
   /// Enregistre la nouvelle photo de profil de la personne connectée.
   Future<void> changerPhoto(Uint8List octets);
+
+  /// Change le nom et/ou le numéro de téléphone de la personne connectée
+  /// (ce qui est null reste inchangé).
+  Future<void> modifierProfil({String? nom, String? telephone});
 }
 
 /// Version réelle, basée sur Firebase Authentication et Firestore.
@@ -86,18 +87,28 @@ class ServiceAuthFirebase implements ServiceAuth {
   @override
   bool get estConnecte => _auth.currentUser != null;
 
+  IdentifiantCompte _lire(String saisie) {
+    final identifiant = IdentifiantCompte.depuis(saisie);
+    if (identifiant == null) {
+      throw const ErreurAuth(
+        'Entrez une adresse e-mail ou un numéro de téléphone valide.',
+        champs: {'email'},
+      );
+    }
+    return identifiant;
+  }
+
   @override
   Future<void> inscrire({
     required String nom,
-    required String telephone,
-    required String email,
-    required String motDePasse,
+    required String identifiant,
   }) async {
+    final id = _lire(identifiant);
     final UserCredential compte;
     try {
       compte = await _auth.createUserWithEmailAndPassword(
-        email: email.trim(),
-        password: motDePasse,
+        email: id.emailInterne,
+        password: id.motDePasse,
       );
     } on FirebaseAuthException catch (e) {
       throw _erreur(e.code);
@@ -109,15 +120,15 @@ class ServiceAuthFirebase implements ServiceAuth {
 
     // Le compte existe déjà à ce stade. Si l'écriture du profil échoue (réseau
     // coupé par exemple), on laisse l'utilisateur entrer : chargerProfil()
-    // retombe alors sur le nom et l'e-mail du compte.
+    // retombe alors sur le nom du compte.
     try {
       await _base.collection('utilisateurs').doc(utilisateur.uid).set({
         'nom': nom.trim(),
-        'telephone': telephone.trim(),
-        'email': email.trim(),
+        'telephone': id.telephone,
+        'email': id.email,
         // Formes comparables, utilisées par la recherche de contacts.
-        'telephoneNormalise': normaliserTelephone(telephone),
-        'emailNormalise': normaliserEmail(email),
+        'telephoneNormalise': normaliserTelephone(id.telephone),
+        'emailNormalise': normaliserEmail(id.email),
         'creeLe': FieldValue.serverTimestamp(),
       });
     } on FirebaseException {
@@ -126,18 +137,22 @@ class ServiceAuthFirebase implements ServiceAuth {
   }
 
   @override
-  Future<void> connecter({
-    required String email,
-    required String motDePasse,
-  }) async {
+  Future<void> connecter({required String identifiant}) async {
+    final id = _lire(identifiant);
     try {
       await _auth.signInWithEmailAndPassword(
-        email: email.trim(),
-        password: motDePasse,
+        email: id.emailInterne,
+        password: id.motDePasse,
       );
     } on FirebaseAuthException catch (e) {
       throw _erreur(e.code);
     }
+  }
+
+  /// L'e-mail du compte, sauf s'il s'agit de l'adresse interne d'un numéro.
+  String _emailVisible(User utilisateur) {
+    final email = utilisateur.email ?? '';
+    return email.endsWith('@telephone.starpole.app') ? '' : email;
   }
 
   @override
@@ -216,7 +231,7 @@ class ServiceAuthFirebase implements ServiceAuth {
         return ProfilUtilisateur(
           nom: (donnees['nom'] as String?) ?? utilisateur.displayName ?? '',
           telephone: (donnees['telephone'] as String?) ?? '',
-          email: (donnees['email'] as String?) ?? utilisateur.email ?? '',
+          email: (donnees['email'] as String?) ?? _emailVisible(utilisateur),
           photo: (photo == null || photo.isEmpty) ? null : base64Decode(photo),
           photoUrl: utilisateur.photoURL,
         );
@@ -226,7 +241,7 @@ class ServiceAuthFirebase implements ServiceAuth {
     }
     return ProfilUtilisateur(
       nom: utilisateur.displayName ?? '',
-      email: utilisateur.email ?? '',
+      email: _emailVisible(utilisateur),
       photoUrl: utilisateur.photoURL,
     );
   }
@@ -239,7 +254,7 @@ class ServiceAuthFirebase implements ServiceAuth {
       final ref = _base.collection('utilisateurs').doc(utilisateur.uid);
       final donnees = (await ref.get()).data() ?? <String, dynamic>{};
 
-      final email = (donnees['email'] as String?) ?? utilisateur.email ?? '';
+      final email = (donnees['email'] as String?) ?? _emailVisible(utilisateur);
       final telephone = (donnees['telephone'] as String?) ?? '';
       final aJour =
           donnees['emailNormalise'] == normaliserEmail(email) &&
@@ -277,19 +292,43 @@ class ServiceAuthFirebase implements ServiceAuth {
     }
   }
 
-  /// Traduit le code d'erreur de Firebase en erreur claire, avec les champs
-  /// à faire vibrer.
+  @override
+  Future<void> modifierProfil({String? nom, String? telephone}) async {
+    final utilisateur = _auth.currentUser;
+    if (utilisateur == null) {
+      throw const ErreurAuth('Connectez-vous pour modifier votre profil.');
+    }
+    final donnees = <String, dynamic>{};
+    if (nom != null) donnees['nom'] = nom.trim();
+    if (telephone != null) {
+      donnees['telephone'] = telephone.trim();
+      donnees['telephoneNormalise'] = normaliserTelephone(telephone);
+    }
+    if (donnees.isEmpty) return;
+    try {
+      // `merge` garde le reste du profil (e-mail, photo...) intact.
+      await _base
+          .collection('utilisateurs')
+          .doc(utilisateur.uid)
+          .set(donnees, SetOptions(merge: true));
+      if (nom != null) await utilisateur.updateDisplayName(nom.trim());
+    } on FirebaseException {
+      throw const ErreurAuth(
+        "Impossible d'enregistrer. Vérifiez votre connexion.",
+      );
+    }
+  }
+
+  /// Traduit le code d'erreur de Firebase en erreur claire, avec le champ à
+  /// faire vibrer.
   ErreurAuth _erreur(String code) {
     switch (code) {
       case 'email-already-in-use':
       case 'invalid-email':
-        return ErreurAuth(_message(code), champs: {'email'});
-      case 'weak-password':
-        return ErreurAuth(_message(code), champs: {'motDePasse'});
       case 'user-not-found':
       case 'wrong-password':
       case 'invalid-credential':
-        return ErreurAuth(_message(code), champs: {'email', 'motDePasse'});
+        return ErreurAuth(_message(code), champs: {'email'});
       default:
         return ErreurAuth(_message(code));
     }
@@ -299,24 +338,22 @@ class ServiceAuthFirebase implements ServiceAuth {
   String _message(String code) {
     switch (code) {
       case 'email-already-in-use':
-        return 'Cette adresse e-mail est déjà utilisée.';
+        return 'Ce compte existe déjà. Connectez-vous.';
       case 'invalid-email':
-        return 'Adresse e-mail invalide.';
-      case 'weak-password':
-        return 'Mot de passe trop court (6 caractères minimum).';
+        return 'E-mail ou numéro invalide.';
       case 'user-not-found':
       case 'wrong-password':
       case 'invalid-credential':
-        return 'E-mail ou mot de passe incorrect.';
+        return 'Aucun compte trouvé avec cet identifiant.';
       case 'user-disabled':
         return 'Ce compte a été désactivé.';
       case 'too-many-requests':
-        return 'Trop d\'essais. Réessayez dans quelques minutes.';
+        return "Trop d'essais. Réessayez dans quelques minutes.";
       case 'network-request-failed':
         return 'Pas de connexion internet.';
       case 'operation-not-allowed':
       case 'configuration-not-found':
-        return 'La connexion par e-mail n\'est pas encore activée '
+        return "La connexion par e-mail n'est pas encore activée "
             'dans la console Firebase.';
       default:
         return 'Une erreur est survenue. Réessayez.';

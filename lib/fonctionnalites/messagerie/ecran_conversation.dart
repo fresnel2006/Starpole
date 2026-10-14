@@ -4,10 +4,13 @@ import 'package:provider/provider.dart';
 import '../../application/couleurs.dart';
 import '../../noyau/format_temps.dart';
 import '../../noyau/messagerie.dart';
+import '../../noyau/appel.dart';
+import '../../noyau/service_appel.dart';
 import '../../noyau/service_messagerie.dart';
 import '../../partage/composants/avatar_utilisateur.dart';
 import '../../partage/composants/vibrant.dart';
 import '../../partage/styles.dart';
+import '../appel/ecran_appel.dart';
 
 /// Une conversation avec une autre personne : ses messages en direct, la zone
 /// pour écrire et l'envoi.
@@ -76,6 +79,32 @@ class _EcranConversationState extends State<EcranConversation> {
     }
   }
 
+  /// Lance un appel (voix ou vidéo) avec l'autre personne, par Internet.
+  Future<void> _appeler({required bool video}) async {
+    try {
+      final session = await context.read<ServiceAppel>().appeler(
+        Contact(id: widget.autreId, nom: widget.autreNom),
+        video: video,
+      );
+      if (!mounted) {
+        session.dispose();
+        return;
+      }
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          fullscreenDialog: true,
+          builder: (_) => EcranAppel(
+            session: session,
+            autreId: widget.autreId,
+            autreNom: widget.autreNom,
+          ),
+        ),
+      );
+    } on ErreurAppel catch (e) {
+      if (mounted) _afficherMessage(e.message);
+    }
+  }
+
   /// Quand l'autre personne écrit pendant que la conversation est ouverte, on
   /// la marque comme lue.
   void _marquerLuSiBesoin(List<Message> messages) {
@@ -96,7 +125,12 @@ class _EcranConversationState extends State<EcranConversation> {
       body: SafeArea(
         child: Column(
           children: [
-            _Entete(autreId: widget.autreId, autreNom: widget.autreNom),
+            _Entete(
+              autreId: widget.autreId,
+              autreNom: widget.autreNom,
+              auAppel: () => _appeler(video: false),
+              auVideo: () => _appeler(video: true),
+            ),
             Expanded(
               child: StreamBuilder<List<Message>>(
                 stream: _flux,
@@ -171,10 +205,17 @@ class _Centre extends StatelessWidget {
 }
 
 class _Entete extends StatelessWidget {
-  const _Entete({required this.autreId, required this.autreNom});
+  const _Entete({
+    required this.autreId,
+    required this.autreNom,
+    required this.auAppel,
+    required this.auVideo,
+  });
 
   final String autreId;
   final String autreNom;
+  final VoidCallback auAppel;
+  final VoidCallback auVideo;
 
   @override
   Widget build(BuildContext context) {
@@ -211,14 +252,40 @@ class _Entete extends StatelessWidget {
               style: Styles.gras(15, Colors.black),
             ),
           ),
-          const Icon(
-            Icons.phone_in_talk_outlined,
-            size: 26,
-            color: Colors.black,
+          Semantics(
+            button: true,
+            label: 'Appeler',
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: auAppel,
+              child: const Padding(
+                padding: EdgeInsets.all(4),
+                child: Icon(
+                  Icons.phone_in_talk_outlined,
+                  size: 26,
+                  color: Colors.black,
+                ),
+              ),
+            ),
           ),
-          const SizedBox(width: 18),
-          const Icon(Icons.videocam_outlined, size: 30, color: Colors.black),
           const SizedBox(width: 12),
+          Semantics(
+            button: true,
+            label: 'Appel vidéo',
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: auVideo,
+              child: const Padding(
+                padding: EdgeInsets.all(4),
+                child: Icon(
+                  Icons.videocam_outlined,
+                  size: 30,
+                  color: Colors.black,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
           const Icon(Icons.more_vert, size: 24, color: Colors.black),
         ],
       ),

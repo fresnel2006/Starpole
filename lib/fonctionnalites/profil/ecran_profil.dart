@@ -5,11 +5,10 @@ import '../../application/couleurs.dart';
 import '../../noyau/alerte.dart';
 import '../../noyau/service_alertes.dart';
 import '../../noyau/service_auth.dart';
-import '../../noyau/service_photo.dart';
-import '../../partage/composants/avatar_personne.dart';
-import '../../partage/composants/choix_source_photo.dart';
+import '../../partage/composants/photo_profil.dart';
 import '../../partage/styles.dart';
 import 'ecran_mes_alertes.dart';
+import 'ecran_modification.dart';
 
 /// Onglet Profil : photo, nom, statistiques et menu.
 class EcranProfil extends StatefulWidget {
@@ -29,39 +28,27 @@ class _EcranProfilState extends State<EcranProfil> {
       .read<ServiceAlertes>()
       .statistiques();
 
-  /// Vrai pendant que la nouvelle photo est enregistrée.
-  bool _envoiEnCours = false;
-
   void _afficherMessage(String texte) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(texte)));
   }
 
-  /// Propose caméra ou galerie, puis enregistre la photo choisie.
-  Future<void> _modifierPhoto() async {
-    final source = await choisirSourcePhoto(context);
-    if (source == null || !mounted) return;
+  /// Recharge le profil (après un changement de photo, de nom ou de numéro).
+  void _recharger() {
+    setState(() {
+      _profil = context.read<ServiceAuth>().chargerProfil();
+    });
+  }
 
-    final photos = context.read<ServicePhoto>();
-    final auth = context.read<ServiceAuth>();
-    setState(() => _envoiEnCours = true);
-    try {
-      final octets = await photos.choisir(source);
-      if (octets == null) return; // l'utilisateur a annulé
-      await auth.changerPhoto(octets);
-      if (!mounted) return;
-      // On recharge le profil pour afficher la nouvelle photo.
-      setState(() {
-        _profil = auth.chargerProfil();
-      });
-    } on ErreurPhoto catch (e) {
-      if (mounted) _afficherMessage(e.message);
-    } on ErreurAuth catch (e) {
-      if (mounted) _afficherMessage(e.message);
-    } finally {
-      if (mounted) setState(() => _envoiEnCours = false);
-    }
+  /// Ouvre la page de modification du profil.
+  Future<void> _modifierProfil() async {
+    final modifie = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(builder: (_) => const EcranModification()),
+    );
+    if (modifie != true || !mounted) return;
+    _recharger();
+    _afficherMessage('Profil mis à jour.');
   }
 
   @override
@@ -74,7 +61,18 @@ class _EcranProfilState extends State<EcranProfil> {
           children: [
             Row(
               children: [
-                const Icon(Icons.settings, size: 36, color: Colors.black),
+                Semantics(
+                  button: true,
+                  label: 'Modifier mon profil',
+                  child: GestureDetector(
+                    onTap: _modifierProfil,
+                    child: const Icon(
+                      Icons.settings,
+                      size: 36,
+                      color: Colors.black,
+                    ),
+                  ),
+                ),
                 Expanded(
                   child: Center(
                     child: Text(
@@ -90,10 +88,9 @@ class _EcranProfilState extends State<EcranProfil> {
             // La photo vient du profil (la sienne, ou celle de son compte Google).
             FutureBuilder<ProfilUtilisateur?>(
               future: _profil,
-              builder: (context, instantane) => _PhotoProfil(
+              builder: (context, instantane) => PhotoProfilModifiable(
                 profil: instantane.data,
-                enCours: _envoiEnCours,
-                auAppui: _modifierPhoto,
+                auChangement: _recharger,
               ),
             ),
             const SizedBox(height: 22),
@@ -179,114 +176,6 @@ class _EcranProfilState extends State<EcranProfil> {
             const _LigneMenu(icone: Icons.help, texte: 'Aides & support'),
             const _LigneMenu(icone: Icons.help, texte: 'A propos'),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Photo de profil ronde avec la pastille de modification (le crayon).
-/// Un appui sur la photo ou sur le crayon ouvre le choix de la source.
-class _PhotoProfil extends StatelessWidget {
-  const _PhotoProfil({
-    required this.profil,
-    required this.enCours,
-    required this.auAppui,
-  });
-
-  final ProfilUtilisateur? profil;
-  final bool enCours;
-  final VoidCallback auAppui;
-
-  /// La photo à montrer, de côté [cote] : la sienne, sinon celle de Google,
-  /// sinon l'icône de compte. Elle remplit tout le cercle, centrée (on garde
-  /// le milieu de l'image et on coupe ce qui dépasse).
-  Widget _contenu(double cote) {
-    const icone = IconeCompte();
-    final photo = profil?.photo;
-    final url = profil?.photoUrl;
-    if (photo != null) {
-      return Image.memory(
-        photo,
-        width: cote,
-        height: cote,
-        fit: BoxFit.cover,
-        alignment: Alignment.center,
-        gaplessPlayback: true,
-        errorBuilder: (_, _, _) => icone,
-      );
-    }
-    if (url != null && url.isNotEmpty) {
-      return Image.network(
-        url,
-        width: cote,
-        height: cote,
-        fit: BoxFit.cover,
-        alignment: Alignment.center,
-        errorBuilder: (_, _, _) => icone,
-      );
-    }
-    return icone;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      label: 'Modifier la photo de profil',
-      child: GestureDetector(
-        onTap: enCours ? null : auAppui,
-        child: SizedBox(
-          width: 126,
-          height: 126,
-          child: Stack(
-            children: [
-              Container(
-                width: 120,
-                height: 120,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 3),
-                  boxShadow: Styles.ombre,
-                ),
-                // 114 = 120 moins les 2 bordures de 3.
-                child: ClipOval(child: _contenu(114)),
-              ),
-              if (enCours)
-                Container(
-                  width: 120,
-                  height: 120,
-                  alignment: Alignment.center,
-                  decoration: const BoxDecoration(
-                    color: Color(0x80000000),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const SizedBox(
-                    width: 32,
-                    height: 32,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 3,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              Positioned(
-                right: 0,
-                bottom: 6,
-                child: Container(
-                  width: 30,
-                  height: 30,
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                    boxShadow: Styles.ombre,
-                  ),
-                  child: const Icon(Icons.edit, size: 16, color: Colors.black),
-                ),
-              ),
-            ],
-          ),
         ),
       ),
     );

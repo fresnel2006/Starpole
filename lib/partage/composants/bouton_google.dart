@@ -4,18 +4,26 @@ import 'package:flutter/material.dart';
 
 /// Bouton blanc « Continuer avec Google » avec le logo Google dessiné.
 class BoutonGoogle extends StatelessWidget {
-  const BoutonGoogle({super.key, required this.auAppui, this.enCours = false});
+  const BoutonGoogle({
+    super.key,
+    required this.auAppui,
+    this.enCours = false,
+    this.libelle = 'Continuer avec Google',
+  });
 
   final VoidCallback auAppui;
 
   /// Si vrai, un cercle de chargement remplace le logo et le bouton est bloqué.
   final bool enCours;
 
+  /// Le texte du bouton.
+  final String libelle;
+
   @override
   Widget build(BuildContext context) {
     return Semantics(
       button: true,
-      label: 'Continuer avec Google',
+      label: libelle,
       child: GestureDetector(
         onTap: enCours ? null : auAppui,
         child: Container(
@@ -49,9 +57,9 @@ class BoutonGoogle extends StatelessWidget {
                     : const _LogoGoogle(),
               ),
               const SizedBox(width: 16),
-              const Text(
-                'Continuer avec Google',
-                style: TextStyle(
+              Text(
+                libelle,
+                style: const TextStyle(
                   fontFamily: 'Poppins',
                   fontSize: 15.6,
                   fontWeight: FontWeight.w700,

@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../application/couleurs.dart';
+import '../../noyau/normalisation.dart';
 import '../../noyau/service_auth.dart';
 import '../../partage/composants/bouton_google.dart';
 import '../../partage/composants/bouton_rouge.dart';
-import '../../partage/composants/case_a_cocher.dart';
 import '../../partage/composants/champ_texte.dart';
 import '../../partage/composants/separateur_ou.dart';
 import '../inscription/ecran_inscription.dart';
@@ -21,17 +21,14 @@ class EcranConnexion extends StatefulWidget {
 
 class _EcranConnexionState extends State<EcranConnexion> {
   final TextEditingController _identifiant = TextEditingController();
-  final TextEditingController _motDePasse = TextEditingController();
   bool _enCours = false;
 
   // Pour faire vibrer un champ précis quand il est vide ou incorrect.
   final GlobalKey<ChampTexteState> _cleIdentifiant = GlobalKey();
-  final GlobalKey<ChampTexteState> _cleMotDePasse = GlobalKey();
 
   @override
   void dispose() {
     _identifiant.dispose();
-    _motDePasse.dispose();
     super.dispose();
   }
 
@@ -44,27 +41,16 @@ class _EcranConnexionState extends State<EcranConnexion> {
   /// Vérifie les champs, puis connecte l'utilisateur avec Firebase.
   Future<void> _seConnecter() async {
     final identifiant = _identifiant.text.trim();
-    // Les champs vides vibrent et clignotent en rouge, sans message.
-    if (identifiant.isEmpty || _motDePasse.text.isEmpty) {
-      if (identifiant.isEmpty) _cleIdentifiant.currentState?.signalerErreur();
-      if (_motDePasse.text.isEmpty) {
-        _cleMotDePasse.currentState?.signalerErreur();
-      }
-      return;
-    }
-    if (!identifiant.contains('@')) {
-      // La connexion par numéro n'existe pas encore : on explique pourquoi.
+    // Un champ vide ou incorrect vibre et clignote en rouge, sans message.
+    if (identifiant.isEmpty || IdentifiantCompte.depuis(identifiant) == null) {
       _cleIdentifiant.currentState?.signalerErreur();
-      _afficherMessage(
-        'Pour le moment, connectez-vous avec votre adresse e-mail.',
-      );
       return;
     }
 
     final auth = context.read<ServiceAuth>();
     setState(() => _enCours = true);
     try {
-      await auth.connecter(email: identifiant, motDePasse: _motDePasse.text);
+      await auth.connecter(identifiant: identifiant);
       if (!mounted) return;
       await Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute<void>(builder: (_) => const EcranPrincipal()),
@@ -75,9 +61,6 @@ class _EcranConnexionState extends State<EcranConnexion> {
       // Les champs concernés vibrent, et le message explique le problème.
       if (e.champs.contains('email')) {
         _cleIdentifiant.currentState?.signalerErreur();
-      }
-      if (e.champs.contains('motDePasse')) {
-        _cleMotDePasse.currentState?.signalerErreur();
       }
       _afficherMessage(e.message);
     } finally {
@@ -178,7 +161,7 @@ class _EcranConnexionState extends State<EcranConnexion> {
                   ),
                 ),
                 placer(
-                  0.425,
+                  0.444,
                   50,
                   ChampTexte(
                     key: _cleIdentifiant,
@@ -190,33 +173,10 @@ class _EcranConnexionState extends State<EcranConnexion> {
                   ),
                 ),
                 placer(
-                  0.499,
-                  50,
-                  ChampTexte(
-                    key: _cleMotDePasse,
-                    erreurEnRouge: true,
-                    controleur: _motDePasse,
-                    icone: Icons.lock,
-                    indication: 'Mot de passe',
-                    masque: true,
-                  ),
-                ),
-                placer(
-                  0.557,
+                  0.519,
                   24,
                   const Row(
                     children: [
-                      CaseACocher(couleurFond: Color(0xFFD9D9D9)),
-                      SizedBox(width: 9),
-                      Text(
-                        'Se souvenir de moi',
-                        style: TextStyle(
-                          fontFamily: 'Poppins',
-                          fontSize: 12.6,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.black,
-                        ),
-                      ),
                       Spacer(),
                       Text(
                         'Mot de passe oublié ?',
@@ -231,7 +191,7 @@ class _EcranConnexionState extends State<EcranConnexion> {
                   ),
                 ),
                 placer(
-                  0.639,
+                  0.624,
                   50,
                   BoutonRouge(
                     libelle: 'Se connecter',
@@ -239,15 +199,15 @@ class _EcranConnexionState extends State<EcranConnexion> {
                     auAppui: _seConnecter,
                   ),
                 ),
-                placer(0.708, 24, const SeparateurOu(couleur: Colors.black)),
+                placer(0.694, 24, const SeparateurOu(couleur: Colors.black)),
                 placer(
-                  0.762,
+                  0.747,
                   50,
                   BoutonGoogle(auAppui: _avecGoogle, enCours: _enCours),
                 ),
                 // « Vous n'avez pas de compte ? S'inscrire »
                 placer(
-                  0.856,
+                  0.84,
                   50,
                   Column(
                     children: [

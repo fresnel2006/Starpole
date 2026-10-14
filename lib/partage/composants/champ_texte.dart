@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../application/couleurs.dart';
+import 'effet_creux.dart';
 
 /// Champ blanc arrondi avec une icône à gauche (téléphone, mail, mot de passe...).
 /// Si [masque] est vrai, le texte est caché et un oeil permet de l'afficher.
@@ -21,6 +22,8 @@ class ChampTexte extends StatefulWidget {
     this.type = TextInputType.text,
     this.controleur,
     this.erreurEnRouge = false,
+    this.modifiable = true,
+    this.enCreux = false,
   });
 
   final IconData icone;
@@ -35,6 +38,12 @@ class ChampTexte extends StatefulWidget {
   /// Si vrai, en cas d'erreur l'icône, le texte et le contour restent rouges
   /// jusqu'à ce que l'utilisateur écrive de nouveau (pour les fonds blancs).
   final bool erreurEnRouge;
+
+  /// Si faux, le champ affiche une valeur sans qu'on puisse la changer.
+  final bool modifiable;
+
+  /// Si vrai, le champ est gris « en creux » (pour saisir une nouvelle valeur).
+  final bool enCreux;
 
   @override
   State<ChampTexte> createState() => ChampTexteState();
@@ -92,9 +101,20 @@ class ChampTexteState extends State<ChampTexte>
             : (math.sin(t * math.pi * 6 - math.pi / 2) + 1) / 2;
         // Part de rouge appliquée au contour, à l'icône et au texte.
         final rouge = _rougeFixe ? 1.0 : clignote;
-        return Transform.translate(
-          offset: Offset(decalage, 0),
-          child: Container(
+        final Widget cadre;
+        if (widget.enCreux) {
+          cadre = EffetCreux(
+            fond: Color.lerp(
+              const Color(0xFFDADADA),
+              const Color(0xFFFFD9D9),
+              clignote,
+            )!,
+            rayon: 14,
+            padding: const EdgeInsets.symmetric(horizontal: 15),
+            child: SizedBox(height: 50, child: enfant),
+          );
+        } else {
+          cadre = Container(
             height: 50,
             padding: const EdgeInsets.symmetric(horizontal: 15),
             decoration: BoxDecoration(
@@ -121,8 +141,9 @@ class ChampTexteState extends State<ChampTexte>
               ],
             ),
             child: enfant,
-          ),
-        );
+          );
+        }
+        return Transform.translate(offset: Offset(decalage, 0), child: cadre);
       },
       child: AnimatedBuilder(
         animation: _animation,
@@ -141,6 +162,7 @@ class ChampTexteState extends State<ChampTexte>
               Expanded(
                 child: TextField(
                   controller: widget.controleur,
+                  enabled: widget.modifiable,
                   obscureText: _cache,
                   keyboardType: widget.type,
                   cursorColor: noir,

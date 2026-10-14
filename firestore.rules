@@ -163,6 +163,49 @@ service cloud.firestore {
       }
     }
 
+    // Appels voix et vidéo entre deux personnes. Le document sert à échanger
+    // les informations de connexion (offre, réponse, candidats) : seuls
+    // l'appelant et la personne appelée peuvent le lire et l'écrire.
+    match /appels/{id} {
+      allow get, list: if request.auth != null
+        && (request.auth.uid == resource.data.appelantId
+            || request.auth.uid == resource.data.appeleId);
+
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly(
+             ['participants', 'appelantId', 'appelantNom', 'appeleId',
+              'appeleNom', 'video', 'statut', 'creeLe', 'offre'])
+        && request.resource.data.appelantId == request.auth.uid
+        && request.resource.data.appeleId != request.auth.uid
+        && request.resource.data.statut == 'sonne'
+        && request.resource.data.video is bool;
+
+      // On ne change que l'état de l'appel, et la réponse n'est écrite que
+      // par la personne appelée.
+      allow update: if request.auth != null
+        && (request.auth.uid == resource.data.appelantId
+            || request.auth.uid == resource.data.appeleId)
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['statut', 'reponse'])
+        && request.resource.data.statut in
+             ['sonne', 'accepte', 'refuse', 'termine', 'annule', 'manque']
+        && (!request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['reponse'])
+            || request.auth.uid == resource.data.appeleId);
+      allow delete: if false;
+
+      match /candidats/{cid} {
+        allow read: if request.auth != null
+          && (request.auth.uid == get(/databases/$(database)/documents/appels/$(id)).data.appelantId
+              || request.auth.uid == get(/databases/$(database)/documents/appels/$(id)).data.appeleId);
+        allow create: if request.auth != null
+          && request.resource.data.de == request.auth.uid
+          && (request.auth.uid == get(/databases/$(database)/documents/appels/$(id)).data.appelantId
+              || request.auth.uid == get(/databases/$(database)/documents/appels/$(id)).data.appeleId);
+        allow update, delete: if false;
+      }
+    }
+
     // Tout le reste est verrouillé tant qu'on n'a pas écrit ses règles.
     match /{document=**} {
       allow read, write: if false;

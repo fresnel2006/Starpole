@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../application/couleurs.dart';
+import '../../noyau/invitation.dart';
 import '../../noyau/messagerie.dart';
 import '../../noyau/service_messagerie.dart';
 import '../../partage/composants/avatar_personne.dart';
@@ -144,11 +145,17 @@ class _EcranAjouterContactState extends State<EcranAjouterContact> {
               ),
               const SizedBox(height: 24),
               if (_erreur != null) _Information(_erreur!),
-              if (_introuvable)
+              if (_introuvable) ...[
                 const _Information(
-                  "Personne n'a été trouvé avec ce numéro ou cet e-mail. "
-                  'Cette personne doit d\'abord créer un compte StarPole.',
+                  "Cette personne n'est pas encore sur StarPole. "
+                  'Invitez-la à créer son compte, puis vous pourrez discuter.',
                 ),
+                const SizedBox(height: 14),
+                BoutonRouge(
+                  libelle: 'Inviter sur StarPole',
+                  auAppui: inviterSurStarPole,
+                ),
+              ],
               if (_trouve != null)
                 _Resultat(
                   contact: _trouve!,

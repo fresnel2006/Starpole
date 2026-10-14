@@ -2,15 +2,18 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:projet_starpole/application/application.dart';
 import 'package:projet_starpole/noyau/alerte.dart';
+import 'package:projet_starpole/noyau/appel.dart';
 import 'package:projet_starpole/noyau/messagerie.dart';
 import 'package:projet_starpole/noyau/normalisation.dart';
 import 'package:projet_starpole/noyau/service_alertes.dart';
+import 'package:projet_starpole/noyau/service_appel.dart';
 import 'package:projet_starpole/noyau/service_auth.dart';
 import 'package:projet_starpole/noyau/service_carnet.dart';
 import 'package:projet_starpole/noyau/service_localisation.dart';
@@ -53,20 +56,15 @@ class FausseAuth implements ServiceAuth {
   @override
   Future<void> inscrire({
     required String nom,
-    required String telephone,
-    required String email,
-    required String motDePasse,
+    required String identifiant,
   }) async {
-    appels.add('inscrire:$nom:$telephone:$email');
+    appels.add('inscrire:$nom:$identifiant');
     if (erreur != null) throw ErreurAuth(erreur!);
   }
 
   @override
-  Future<void> connecter({
-    required String email,
-    required String motDePasse,
-  }) async {
-    appels.add('connecter:$email');
+  Future<void> connecter({required String identifiant}) async {
+    appels.add('connecter:$identifiant');
     if (erreur != null) throw ErreurAuth(erreur!);
   }
 
@@ -83,6 +81,12 @@ class FausseAuth implements ServiceAuth {
   @override
   Future<void> changerPhoto(Uint8List octets) async {
     photosEnvoyees.add(octets);
+  }
+
+  @override
+  Future<void> modifierProfil({String? nom, String? telephone}) async {
+    appels.add('modifier:$nom:$telephone');
+    if (erreur != null) throw ErreurAuth(erreur!);
   }
 
   @override
@@ -566,6 +570,7 @@ Future<void> allerALInscription(
   ServiceAlertes? alertes,
   ServiceMessagerie? messagerie,
   ServiceCarnet? carnet,
+  ServiceAppel? appels,
 }) async {
   await chargerPoppins();
   tester.view.physicalSize = const Size(780, 1688);
@@ -578,6 +583,7 @@ Future<void> allerALInscription(
       alertes: alertes ?? FausseAlertes(initiales: alertesDeDepart()),
       messagerie: messagerie ?? FausseMessagerie(),
       carnet: carnet ?? FausseCarnet(),
+      appels: appels ?? FausseAppel(),
       photos: photos,
       localisation: localisation ?? FausseLocalisation(),
     ),
@@ -591,13 +597,11 @@ Future<void> allerALInscription(
   expect(find.text('Créer un compte'), findsOneWidget);
 }
 
-/// Remplit les 4 champs de l'inscription (nom, téléphone, e-mail, mot de passe).
+/// Remplit les 2 champs de l'inscription (nom, e-mail ou numéro).
 Future<void> remplirInscription(WidgetTester tester) async {
   final champs = find.byType(TextField);
   await tester.enterText(champs.at(0), 'Ange Fresnel');
-  await tester.enterText(champs.at(1), '0700000000');
-  await tester.enterText(champs.at(2), 'fresnel@exemple.ci');
-  await tester.enterText(champs.at(3), 'secret123');
+  await tester.enterText(champs.at(1), 'fresnel@exemple.ci');
 }
 
 /// Inscription complète : on arrive sur l'accueil.
@@ -621,7 +625,7 @@ void main() {
     // compte n'est créé.
     await tester.tap(find.text("S'inscrire").last);
     await tester.pump();
-    for (var i = 0; i < 4; i++) {
+    for (var i = 0; i < 2; i++) {
       final champ = tester.state<ChampTexteState>(
         find.byType(ChampTexte).at(i),
       );
@@ -630,6 +634,20 @@ void main() {
     expect(find.byType(SnackBar), findsNothing);
     expect(auth.appels, isEmpty);
     await tester.pumpAndSettle();
+
+    // Un identifiant qui n'est ni un e-mail ni un numéro fait vibrer le champ.
+    await tester.enterText(find.byType(TextField).at(0), 'Ange Fresnel');
+    await tester.enterText(find.byType(TextField).at(1), 'abc');
+    await tester.tap(find.byType(CaseACocher));
+    await tester.tap(find.text("S'inscrire").last);
+    await tester.pump();
+    expect(
+      tester.state<ChampTexteState>(find.byType(ChampTexte).at(1)).enErreur,
+      isTrue,
+    );
+    expect(auth.appels, isEmpty);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(CaseACocher)); // on décoche
 
     // Champs remplis mais conditions non cochées : la case vibre.
     await remplirInscription(tester);
@@ -647,9 +665,7 @@ void main() {
     await tester.tap(find.byType(CaseACocher));
     await tester.tap(find.text("S'inscrire").last);
     await tester.pumpAndSettle();
-    expect(auth.appels, [
-      'inscrire:Ange Fresnel:0700000000:fresnel@exemple.ci',
-    ]);
+    expect(auth.appels, ['inscrire:Ange Fresnel:fresnel@exemple.ci']);
     expect(find.text('Abidjan, Plateau'), findsOneWidget);
   });
 
@@ -663,56 +679,55 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Connexion'), findsOneWidget);
 
-    // Champs vides : ils vibrent, sans message.
+    // Champ vide : il vibre, sans message.
     await tester.tap(find.text('Se connecter').last);
     await tester.pump();
     expect(
       tester.state<ChampTexteState>(find.byType(ChampTexte).at(0)).enErreur,
       isTrue,
     );
-    expect(
-      tester.state<ChampTexteState>(find.byType(ChampTexte).at(1)).enErreur,
-      isTrue,
-    );
     expect(find.byType(SnackBar), findsNothing);
     await tester.pumpAndSettle();
-    // Les champs restent rouges après l'animation (fond blanc de la connexion).
+    // Le champ reste rouge après l'animation (fond blanc de la connexion).
     expect(
       tester.state<ChampTexteState>(find.byType(ChampTexte).at(0)).rougeFixe,
       isTrue,
     );
 
-    // Dès qu'on écrit dans un champ, il n'est plus rouge.
+    // Dès qu'on écrit dans le champ, il n'est plus rouge.
     await tester.enterText(find.byType(TextField).at(0), 'a');
     await tester.pump();
     expect(
       tester.state<ChampTexteState>(find.byType(ChampTexte).at(0)).rougeFixe,
       isFalse,
     );
-    expect(
-      tester.state<ChampTexteState>(find.byType(ChampTexte).at(1)).rougeFixe,
-      isTrue,
-    );
-    await tester.enterText(find.byType(TextField).at(0), '');
 
-    // Un numéro de téléphone n'est pas encore accepté.
-    final champs = find.byType(TextField);
-    await tester.enterText(champs.at(0), '0700000000');
-    await tester.enterText(champs.at(1), 'secret123');
+    // Ni un e-mail ni un numéro : le champ vibre, aucune connexion.
     await tester.tap(find.text('Se connecter').last);
     await tester.pump();
     expect(
-      find.text('Pour le moment, connectez-vous avec votre adresse e-mail.'),
-      findsOneWidget,
+      tester.state<ChampTexteState>(find.byType(ChampTexte).at(0)).enErreur,
+      isTrue,
     );
+    expect(auth.appels, isEmpty);
+    await tester.pumpAndSettle();
 
     // Une erreur de Firebase s'affiche et on reste sur la connexion.
+    final champs = find.byType(TextField);
     await tester.enterText(champs.at(0), 'fresnel@exemple.ci');
     await tester.tap(find.text('Se connecter').last);
     await tester.pumpAndSettle();
     expect(find.text('E-mail ou mot de passe incorrect.'), findsOneWidget);
     expect(find.text('Connexion'), findsOneWidget);
-    expect(auth.appels, ['connecter:fresnel@exemple.ci']);
+
+    // Un numéro de téléphone est accepté aussi.
+    await tester.enterText(champs.at(0), '07 07 07 07 07');
+    await tester.tap(find.text('Se connecter').last);
+    await tester.pumpAndSettle();
+    expect(auth.appels, [
+      'connecter:fresnel@exemple.ci',
+      'connecter:07 07 07 07 07',
+    ]);
   });
 
   testWidgets('Google : fenêtre fermée, erreur, puis connexion réussie', (
@@ -769,6 +784,29 @@ void main() {
       find.text('Aucune alerte près de chez vous pour le moment.'),
       findsOneWidget,
     );
+  });
+
+  testWidgets("Un appui sur « Signalé par » ouvre la messagerie de l'auteur", (
+    tester,
+  ) async {
+    final messagerie = FausseMessagerie();
+    await allerALInscription(
+      tester,
+      FausseAuth(),
+      alertes: FausseAlertes(initiales: alertesDeDepart()),
+      messagerie: messagerie,
+    );
+    await sInscrire(tester);
+
+    await tester.tap(find.text('Personne en detresse'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Signalé par'));
+    await tester.tap(find.text('Signalé par'));
+    await tester.pumpAndSettle();
+
+    expect(messagerie.actions, contains('ouvrir:kouadio'));
+    expect(find.text('Dites bonjour à Kouadio Eliezer.'), findsOneWidget);
+    expect(find.byIcon(Icons.videocam_outlined), findsOneWidget);
   });
 
   testWidgets("Aider une alerte : bandeau, suivi, arrêt et note de l'auteur", (
@@ -1200,7 +1238,8 @@ void main() {
     await tester.enterText(find.byType(TextField), '0100000000');
     await tester.tap(find.text('Rechercher'));
     await tester.pumpAndSettle();
-    expect(find.textContaining("Personne n'a été trouvé"), findsOneWidget);
+    expect(find.textContaining("pas encore sur StarPole"), findsOneWidget);
+    expect(find.text('Inviter sur StarPole'), findsOneWidget);
 
     // Mon propre numéro.
     await tester.enterText(find.byType(TextField), '01 02 03 04 05');
@@ -1251,6 +1290,135 @@ void main() {
     expect(find.text('Oncle Kouassi'), findsOneWidget);
     expect(find.text('Déjà dans vos contacts'), findsOneWidget);
     expect(find.text('Ajouter'), findsNothing);
+  });
+
+  testWidgets('Profil : page Modification (nom et numéro)', (tester) async {
+    final auth = FausseAuth();
+    await allerALInscription(tester, auth);
+    await sInscrire(tester);
+    await tester.tap(find.text('Profil'));
+    await tester.pumpAndSettle();
+
+    // Le rouage ouvre la page ; les champs blancs montrent les valeurs actuelles.
+    await tester.tap(find.byIcon(Icons.settings));
+    await tester.pumpAndSettle();
+    expect(find.text('Modification'), findsOneWidget);
+    expect(find.text('Ange Fresnel'), findsOneWidget);
+    expect(find.text('0700000000'), findsOneWidget);
+
+    // Rien de saisi : les deux champs gris vibrent, rien n'est enregistré.
+    await tester.tap(find.text('Valider'));
+    await tester.pump();
+    for (final i in [1, 3]) {
+      final champ = tester.state<ChampTexteState>(
+        find.byType(ChampTexte).at(i),
+      );
+      expect(champ.enErreur, isTrue);
+    }
+    expect(find.byType(SnackBar), findsNothing);
+    await tester.pumpAndSettle();
+
+    // Un numéro trop court vibre.
+    final champs = find.byType(TextField);
+    await tester.enterText(champs.at(3), '123');
+    await tester.tap(find.text('Valider'));
+    await tester.pump();
+    expect(
+      tester.state<ChampTexteState>(find.byType(ChampTexte).at(3)).enErreur,
+      isTrue,
+    );
+    expect(auth.appels.where((a) => a.startsWith('modifier')), isEmpty);
+    await tester.pumpAndSettle();
+
+    // Nom et numéro valides : enregistrés, retour au profil.
+    await tester.enterText(champs.at(1), 'Nouveau Nom');
+    await tester.enterText(champs.at(3), '05 05 05 05 05');
+    await tester.tap(find.text('Valider'));
+    await tester.pumpAndSettle();
+    expect(auth.appels, contains('modifier:Nouveau Nom:05 05 05 05 05'));
+    expect(find.text('Modification'), findsNothing);
+    expect(find.text('Profil mis à jour.'), findsOneWidget);
+  });
+
+  testWidgets('Appel : lancer un appel vidéo puis raccrocher', (tester) async {
+    final messagerie = FausseMessagerie(contacts: [kouassi]);
+    final appels = FausseAppel();
+    await allerALInscription(
+      tester,
+      FausseAuth(),
+      messagerie: messagerie,
+      appels: appels,
+    );
+    await sInscrire(tester);
+    await tester.tap(find.text('Message'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.forum));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Oncle Kouassi'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.videocam_outlined));
+    await tester.pumpAndSettle();
+    expect(appels.actions, ['appeler:kouassi:video']);
+    expect(find.text('Appel en cours...'), findsOneWidget);
+
+    // L'autre décroche : la durée s'affiche.
+    appels.derniere.etatInterne.value = EtatAppel.enCours;
+    await tester.pump(const Duration(seconds: 2));
+    expect(find.text('00:02'), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.call_end));
+    await tester.pumpAndSettle();
+    expect(appels.derniere.raccroche, isTrue);
+    expect(find.text('Dites bonjour à Oncle Kouassi.'), findsOneWidget);
+  });
+
+  testWidgets('Appel : un appel entrant, répondre puis refuser un autre', (
+    tester,
+  ) async {
+    final appels = FausseAppel();
+    await allerALInscription(tester, FausseAuth(), appels: appels);
+    await sInscrire(tester);
+
+    appels.entrants.add(
+      const AppelEntrant(
+        id: 'a1',
+        appelantId: 'kouassi',
+        appelantNom: 'Oncle Kouassi',
+        video: false,
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('Oncle Kouassi'), findsOneWidget);
+    expect(find.text('Appel vocal StarPole'), findsOneWidget);
+
+    await tester.tap(find.bySemanticsLabel('Répondre'));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(appels.actions, ['repondre:a1']);
+    expect(find.text('Raccrocher'), findsNothing);
+    expect(find.byIcon(Icons.call_end), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.call_end));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.call_end), findsNothing);
+
+    // Un second appel est refusé.
+    appels.entrants.add(
+      const AppelEntrant(
+        id: 'a2',
+        appelantId: 'kouassi',
+        appelantNom: 'Oncle Kouassi',
+        video: true,
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('Appel vidéo StarPole'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.call_end));
+    await tester.pumpAndSettle();
+    expect(appels.actions, ['repondre:a1', 'refuser:a2']);
+    expect(find.text('Appel vidéo StarPole'), findsNothing);
   });
 
   testWidgets('Messagerie : écrire à un contact et le voir dans la liste', (
@@ -1517,4 +1685,78 @@ void main() {
       findsOneWidget,
     );
   });
+}
+
+/// Faux service d'appel : il note ce qui est demandé et laisse le test
+/// faire sonner un appel entrant.
+class FausseAppel implements ServiceAppel {
+  final StreamController<AppelEntrant?> entrants =
+      StreamController<AppelEntrant?>.broadcast();
+  final List<String> actions = [];
+  late FausseSession derniere;
+
+  @override
+  Stream<AppelEntrant?> appelsEntrants() => entrants.stream;
+
+  @override
+  Future<SessionAppel> appeler(Contact contact, {required bool video}) async {
+    actions.add('appeler:${contact.id}:${video ? 'video' : 'voix'}');
+    return derniere = FausseSession(video: video);
+  }
+
+  @override
+  Future<SessionAppel> repondre(AppelEntrant appel) async {
+    actions.add('repondre:${appel.id}');
+    return derniere = FausseSession(
+      video: appel.video,
+      etat: EtatAppel.enCours,
+    );
+  }
+
+  @override
+  Future<void> refuser(AppelEntrant appel) async {
+    actions.add('refuser:${appel.id}');
+  }
+}
+
+/// Fausse session d'appel : l'état se change à la main dans les tests.
+class FausseSession implements SessionAppel {
+  FausseSession({required this.video, EtatAppel etat = EtatAppel.sonne})
+    : etatInterne = ValueNotifier(etat);
+
+  @override
+  final bool video;
+  final ValueNotifier<EtatAppel> etatInterne;
+  bool raccroche = false;
+
+  @override
+  ValueListenable<EtatAppel> get etat => etatInterne;
+  @override
+  final ValueNotifier<bool> microCoupe = ValueNotifier(false);
+  @override
+  final ValueNotifier<bool> cameraCoupee = ValueNotifier(false);
+  @override
+  final ValueNotifier<bool> hautParleur = ValueNotifier(false);
+
+  @override
+  void basculerMicro() => microCoupe.value = !microCoupe.value;
+  @override
+  void basculerCamera() => cameraCoupee.value = !cameraCoupee.value;
+  @override
+  void basculerHautParleur() => hautParleur.value = !hautParleur.value;
+
+  @override
+  Widget vueDistante() => const SizedBox();
+  @override
+  Widget vueLocale() => const SizedBox();
+
+  @override
+  Future<void> raccrocher() async {
+    if (raccroche) return;
+    raccroche = true;
+    etatInterne.value = EtatAppel.termine;
+  }
+
+  @override
+  void dispose() {}
 }

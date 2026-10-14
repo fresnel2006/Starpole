@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../application/couleurs.dart';
+import '../../noyau/normalisation.dart';
 import '../../noyau/service_auth.dart';
 import '../../partage/composants/bouton_google.dart';
 import '../../partage/composants/bouton_rouge.dart';
@@ -21,25 +22,19 @@ class EcranInscription extends StatefulWidget {
 
 class _EcranInscriptionState extends State<EcranInscription> {
   final TextEditingController _nom = TextEditingController();
-  final TextEditingController _telephone = TextEditingController();
-  final TextEditingController _email = TextEditingController();
-  final TextEditingController _motDePasse = TextEditingController();
+  final TextEditingController _identifiant = TextEditingController();
   bool _conditionsAcceptees = false;
   bool _enCours = false;
 
   // Pour faire vibrer un champ précis quand il est vide ou incorrect.
   final GlobalKey<ChampTexteState> _cleNom = GlobalKey();
-  final GlobalKey<ChampTexteState> _cleTelephone = GlobalKey();
-  final GlobalKey<ChampTexteState> _cleEmail = GlobalKey();
-  final GlobalKey<ChampTexteState> _cleMotDePasse = GlobalKey();
+  final GlobalKey<ChampTexteState> _cleIdentifiant = GlobalKey();
   final GlobalKey<CaseACocherState> _cleConditions = GlobalKey();
 
   @override
   void dispose() {
     _nom.dispose();
-    _telephone.dispose();
-    _email.dispose();
-    _motDePasse.dispose();
+    _identifiant.dispose();
     super.dispose();
   }
 
@@ -54,9 +49,7 @@ class _EcranInscriptionState extends State<EcranInscription> {
     // Les champs vides vibrent et clignotent en rouge, sans message.
     final vides = <GlobalKey<ChampTexteState>>[
       if (_nom.text.trim().isEmpty) _cleNom,
-      if (_telephone.text.trim().isEmpty) _cleTelephone,
-      if (_email.text.trim().isEmpty) _cleEmail,
-      if (_motDePasse.text.isEmpty) _cleMotDePasse,
+      if (_identifiant.text.trim().isEmpty) _cleIdentifiant,
     ];
     if (vides.isNotEmpty) {
       for (final cle in vides) {
@@ -64,12 +57,8 @@ class _EcranInscriptionState extends State<EcranInscription> {
       }
       return;
     }
-    if (!_email.text.contains('@')) {
-      _cleEmail.currentState?.signalerErreur();
-      return;
-    }
-    if (_motDePasse.text.length < 6) {
-      _cleMotDePasse.currentState?.signalerErreur();
+    if (IdentifiantCompte.depuis(_identifiant.text) == null) {
+      _cleIdentifiant.currentState?.signalerErreur();
       return;
     }
     if (!_conditionsAcceptees) {
@@ -80,12 +69,7 @@ class _EcranInscriptionState extends State<EcranInscription> {
     final auth = context.read<ServiceAuth>();
     setState(() => _enCours = true);
     try {
-      await auth.inscrire(
-        nom: _nom.text,
-        telephone: _telephone.text,
-        email: _email.text,
-        motDePasse: _motDePasse.text,
-      );
+      await auth.inscrire(nom: _nom.text, identifiant: _identifiant.text);
       if (!mounted) return;
       await Navigator.of(context).pushAndRemoveUntil(
         MaterialPageRoute<void>(builder: (_) => const EcranPrincipal()),
@@ -94,9 +78,8 @@ class _EcranInscriptionState extends State<EcranInscription> {
     } on ErreurAuth catch (e) {
       if (!mounted) return;
       // Les champs concernés vibrent, et le message explique le problème.
-      if (e.champs.contains('email')) _cleEmail.currentState?.signalerErreur();
-      if (e.champs.contains('motDePasse')) {
-        _cleMotDePasse.currentState?.signalerErreur();
+      if (e.champs.contains('email')) {
+        _cleIdentifiant.currentState?.signalerErreur();
       }
       _afficherMessage(e.message);
     } finally {
@@ -223,7 +206,7 @@ class _EcranInscriptionState extends State<EcranInscription> {
                   ),
                 ),
                 placer(
-                  0.281,
+                  0.323,
                   50,
                   ChampTexte(
                     key: _cleNom,
@@ -233,42 +216,19 @@ class _EcranInscriptionState extends State<EcranInscription> {
                   ),
                 ),
                 placer(
-                  0.356,
+                  0.405,
                   50,
                   ChampTexte(
-                    key: _cleTelephone,
-                    controleur: _telephone,
-                    icone: Icons.phone_in_talk_outlined,
-                    indication: 'Numero de telephone',
-                    type: TextInputType.phone,
-                  ),
-                ),
-                placer(
-                  0.4325,
-                  50,
-                  ChampTexte(
-                    key: _cleEmail,
-                    controleur: _email,
-                    icone: Icons.mark_email_unread_outlined,
-                    indication: 'Email',
+                    key: _cleIdentifiant,
+                    controleur: _identifiant,
+                    icone: Icons.contact_phone,
+                    indication: 'Email ou numero de telephone',
                     type: TextInputType.emailAddress,
-                  ),
-                ),
-                placer(
-                  0.508,
-                  50,
-                  ChampTexte(
-                    key: _cleMotDePasse,
-                    controleur: _motDePasse,
-                    icone: Icons.lock,
-                    indication: 'Mot de passe',
-                    masque: true,
-                    avecOeil: true,
                   ),
                 ),
                 // Acceptation des conditions.
                 placer(
-                  0.584,
+                  0.498,
                   44,
                   Row(
                     children: [
@@ -301,7 +261,7 @@ class _EcranInscriptionState extends State<EcranInscription> {
                   ),
                 ),
                 placer(
-                  0.676,
+                  0.623,
                   50,
                   BoutonRouge(
                     libelle: "S'inscrire",
@@ -309,15 +269,15 @@ class _EcranInscriptionState extends State<EcranInscription> {
                     auAppui: _sInscrire,
                   ),
                 ),
-                placer(0.737, 24, const SeparateurOu(couleur: Colors.white)),
+                placer(0.685, 24, const SeparateurOu(couleur: Colors.white)),
                 placer(
-                  0.789,
+                  0.738,
                   50,
                   BoutonGoogle(auAppui: _avecGoogle, enCours: _enCours),
                 ),
                 // « Vous avez deja un compte ? Se connecter »
                 placer(
-                  0.881,
+                  0.831,
                   50,
                   Column(
                     children: [

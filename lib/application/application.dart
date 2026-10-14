@@ -5,6 +5,7 @@ import '../fonctionnalites/info_departs/ecran_info_departs.dart';
 import '../fonctionnalites/principal/ecran_principal.dart';
 import '../noyau/position_utilisateur.dart';
 import '../noyau/service_alertes.dart';
+import '../noyau/service_appel.dart';
 import '../noyau/service_auth.dart';
 import '../noyau/service_carnet.dart';
 import '../noyau/service_localisation.dart';
@@ -21,6 +22,7 @@ class ApplicationStarPole extends StatelessWidget {
     this.photos,
     this.localisation,
     this.carnet,
+    this.appels,
   });
 
   /// Le service de compte (Firebase dans l'appli, un faux dans les tests).
@@ -41,6 +43,9 @@ class ApplicationStarPole extends StatelessWidget {
   /// Le service du carnet de contacts du téléphone (un faux dans les tests).
   final ServiceCarnet? carnet;
 
+  /// Le service des appels voix et vidéo (un faux dans les tests).
+  final ServiceAppel? appels;
+
   @override
   Widget build(BuildContext context) {
     final servicePosition = localisation ?? ServiceLocalisationReel();
@@ -52,6 +57,7 @@ class ApplicationStarPole extends StatelessWidget {
         Provider<ServicePhoto>.value(value: photos ?? ServicePhotoReel()),
         Provider<ServiceLocalisation>.value(value: servicePosition),
         Provider<ServiceCarnet>.value(value: carnet ?? ServiceCarnetReel()),
+        Provider<ServiceAppel>.value(value: appels ?? ServiceAppelFirebase()),
         ChangeNotifierProvider(
           create: (_) => PositionUtilisateur(servicePosition),
         ),

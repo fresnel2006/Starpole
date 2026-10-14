@@ -4,13 +4,16 @@ import 'package:provider/provider.dart';
 import '../../application/couleurs.dart';
 import '../../noyau/alerte.dart';
 import '../../noyau/format_temps.dart';
+import '../../noyau/messagerie.dart';
 import '../../noyau/position_utilisateur.dart';
 import '../../noyau/service_alertes.dart';
+import '../../noyau/service_messagerie.dart';
 import '../../partage/composants/apparence_alerte.dart';
 import '../../partage/composants/avatar_personne.dart';
 import '../../partage/composants/entete_retour.dart';
 import '../../partage/composants/puce.dart';
 import '../../partage/styles.dart';
+import '../messagerie/ecran_conversation.dart';
 import 'ecran_suivi_alerte.dart';
 
 /// Détails d'une alerte : description, photo, lieu, et les boutons d'aide.
@@ -43,6 +46,27 @@ class _EcranDetailsAlerteState extends State<EcranDetailsAlerte> {
         builder: (_) => EcranSuiviAlerte(alerteId: alerte.id),
       ),
     );
+  }
+
+  /// Ouvre la messagerie directe avec la personne qui a signalé l'alerte.
+  Future<void> _ecrireA(Alerte alerte) async {
+    final messagerie = context.read<ServiceMessagerie>();
+    final auteur = Contact(id: alerte.auteurId, nom: alerte.auteurNom);
+    try {
+      final id = await messagerie.ouvrirConversation(auteur);
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => EcranConversation(
+            conversationId: id,
+            autreId: auteur.id,
+            autreNom: auteur.nom,
+          ),
+        ),
+      );
+    } on ErreurMessagerie catch (e) {
+      if (mounted) _afficherMessage(e.message);
+    }
   }
 
   /// J'accepte d'aider : l'alerte m'est attribuée, puis on ouvre son suivi.
@@ -209,34 +233,47 @@ class _EcranDetailsAlerteState extends State<EcranDetailsAlerte> {
                     voirSuivi: () => _ouvrirSuivi(alerte),
                   ),
                   const SizedBox(height: 22),
-                  Row(
-                    children: [
-                      const AvatarPersonne(taille: 52, avecOmbre: true),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Signalé par',
-                              style: Styles.gras(
-                                15,
-                                Couleurs.grisTexte,
-                                poids: FontWeight.w500,
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    // Un appui sur l'auteur ouvre la discussion avec lui.
+                    onTap: alerte.auteurId == moi
+                        ? null
+                        : () => _ecrireA(alerte),
+                    child: Row(
+                      children: [
+                        const AvatarPersonne(taille: 52, avecOmbre: true),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Signalé par',
+                                style: Styles.gras(
+                                  15,
+                                  Couleurs.grisTexte,
+                                  poids: FontWeight.w500,
+                                ),
                               ),
-                            ),
-                            Text(
-                              alerte.auteurId == moi
-                                  ? '${alerte.auteurNom} (vous)'
-                                  : alerte.auteurNom,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Styles.gras(15.1, Colors.black),
-                            ),
-                          ],
+                              Text(
+                                alerte.auteurId == moi
+                                    ? '${alerte.auteurNom} (vous)'
+                                    : alerte.auteurNom,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Styles.gras(15.1, Colors.black),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
+                        if (alerte.auteurId != moi)
+                          const Icon(
+                            Icons.chat_bubble_outline,
+                            size: 24,
+                            color: Couleurs.rouge,
+                          ),
+                      ],
+                    ),
                   ),
                 ],
               ),
