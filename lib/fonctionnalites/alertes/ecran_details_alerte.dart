@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../application/couleurs.dart';
 import '../../noyau/alerte.dart';
 import '../../noyau/format_temps.dart';
+import '../../noyau/invitation.dart';
 import '../../noyau/messagerie.dart';
 import '../../noyau/position_utilisateur.dart';
 import '../../noyau/service_alertes.dart';
@@ -231,6 +232,7 @@ class _EcranDetailsAlerteState extends State<EcranDetailsAlerte> {
                     enCours: _enCours,
                     aider: () => _aider(alerte),
                     voirSuivi: () => _ouvrirSuivi(alerte),
+                    partager: () => partagerAlerte(alerte),
                   ),
                   const SizedBox(height: 22),
                   GestureDetector(
@@ -293,6 +295,7 @@ class _Actions extends StatelessWidget {
     required this.enCours,
     required this.aider,
     required this.voirSuivi,
+    required this.partager,
   });
 
   final Alerte alerte;
@@ -300,6 +303,7 @@ class _Actions extends StatelessWidget {
   final bool enCours;
   final VoidCallback aider;
   final VoidCallback voirSuivi;
+  final VoidCallback partager;
 
   @override
   Widget build(BuildContext context) {
@@ -344,11 +348,12 @@ class _Actions extends StatelessWidget {
       children: [
         principal,
         const SizedBox(height: 14),
-        const _BoutonAction(
+        _BoutonAction(
           libelle: 'Partager',
           icone: Icons.share,
           fond: Colors.white,
           couleurTexte: Couleurs.vert,
+          auAppui: partager,
         ),
       ],
     );

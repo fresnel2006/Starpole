@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -47,7 +48,15 @@ abstract class ServiceMessagerie {
   /// Les messages d'une conversation, le plus ancien d'abord, en direct.
   Stream<List<Message>> messages(String conversationId);
 
-  Future<void> envoyerMessage(String conversationId, String texte);
+  /// Envoie un message. Une [photo] ou une position ([latitude] et
+  /// [longitude]) peuvent l'accompagner.
+  Future<void> envoyerMessage(
+    String conversationId,
+    String texte, {
+    Uint8List? photo,
+    double? latitude,
+    double? longitude,
+  });
 
   /// Indique que j'ai lu la conversation.
   Future<void> marquerLu(String conversationId);
@@ -267,7 +276,13 @@ class ServiceMessagerieFirebase implements ServiceMessagerie {
   }
 
   @override
-  Future<void> envoyerMessage(String conversationId, String texte) async {
+  Future<void> envoyerMessage(
+    String conversationId,
+    String texte, {
+    Uint8List? photo,
+    double? latitude,
+    double? longitude,
+  }) async {
     final moi = _moi();
     final nettoye = texte.trim();
     if (nettoye.isEmpty) return;
@@ -279,6 +294,9 @@ class ServiceMessagerieFirebase implements ServiceMessagerie {
         'texte': nettoye,
         'auteurId': moi,
         'creeLe': FieldValue.serverTimestamp(),
+        if (photo != null) 'photo': base64Encode(photo),
+        'latitude': ?latitude,
+        'longitude': ?longitude,
       });
       lot.update(conversation, {
         'dernierMessage': nettoye.length > 120

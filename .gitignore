@@ -51,3 +51,6 @@ app.*.map.json
 # Pour la recréer : flutterfire configure --project=starpole-3d84d
 /lib/firebase_options.dart
 /android/app/google-services.json
+
+# Jeton Mapbox (privé) : le modèle cle_mapbox.exemple.dart, lui, est sur Git
+lib/noyau/cle_mapbox.dart

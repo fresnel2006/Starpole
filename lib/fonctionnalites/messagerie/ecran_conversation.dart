@@ -1,14 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart' show LatLng;
 import 'package:provider/provider.dart';
 
 import '../../application/couleurs.dart';
 import '../../noyau/format_temps.dart';
 import '../../noyau/messagerie.dart';
+import '../../noyau/position_utilisateur.dart';
+import '../../noyau/service_photo.dart';
 import '../../noyau/appel.dart';
 import '../../noyau/service_appel.dart';
 import '../../noyau/service_messagerie.dart';
 import '../../partage/composants/avatar_utilisateur.dart';
 import '../../partage/composants/vibrant.dart';
+import '../../partage/composants/couche_tuiles.dart';
 import '../../partage/styles.dart';
 import '../appel/ecran_appel.dart';
 
@@ -72,6 +77,59 @@ class _EcranConversationState extends State<EcranConversation> {
     try {
       await _service.envoyerMessage(widget.conversationId, texte);
       if (mounted) _saisie.clear();
+    } on ErreurMessagerie catch (e) {
+      if (mounted) _afficherMessage(e.message);
+    } finally {
+      if (mounted) setState(() => _envoiEnCours = false);
+    }
+  }
+
+  /// Envoie ma position actuelle, qui s'affiche sur une petite carte.
+  Future<void> _envoyerPosition() async {
+    if (_envoiEnCours) return;
+    final position = context.read<PositionUtilisateur>();
+    setState(() => _envoiEnCours = true);
+    try {
+      if (position.lieu?.latitude == null) await position.actualiser();
+      final lieu = position.lieu;
+      final latitude = lieu?.latitude;
+      final longitude = lieu?.longitude;
+      if (lieu == null || latitude == null || longitude == null) {
+        if (mounted) {
+          _afficherMessage(
+            'Activez la localisation pour envoyer votre position.',
+          );
+        }
+        return;
+      }
+      await _service.envoyerMessage(
+        widget.conversationId,
+        'Ma localisation : ${lieu.libelle}',
+        latitude: latitude,
+        longitude: longitude,
+      );
+    } on ErreurMessagerie catch (e) {
+      if (mounted) _afficherMessage(e.message);
+    } finally {
+      if (mounted) setState(() => _envoiEnCours = false);
+    }
+  }
+
+  /// Ouvre le sélecteur de photos du téléphone, puis envoie la photo.
+  Future<void> _envoyerPhoto() async {
+    if (_envoiEnCours) return;
+    final photos = context.read<ServicePhoto>();
+    setState(() => _envoiEnCours = true);
+    try {
+      final octets = await photos.choisir(forme: FormePhoto.paysage);
+      if (octets == null) return; // l'utilisateur a annulé
+      await _service.envoyerMessage(
+        widget.conversationId,
+        'Photo',
+        photo: octets,
+      );
+    } on ErreurPhoto catch (e) {
+      if (mounted) _afficherMessage(e.message);
     } on ErreurMessagerie catch (e) {
       if (mounted) _afficherMessage(e.message);
     } finally {
@@ -176,6 +234,8 @@ class _EcranConversationState extends State<EcranConversation> {
               cle: _cleSaisie,
               envoiEnCours: _envoiEnCours,
               envoyer: _envoyer,
+              envoyerPosition: _envoyerPosition,
+              envoyerPhoto: _envoyerPhoto,
             ),
           ],
         ),
@@ -321,17 +381,88 @@ class _Bulle extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  message.texte,
-                  style: Styles.gras(12.5, couleurTexte, hauteur: 1.5),
+              if (message.photo != null) ...[
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: AspectRatio(
+                    aspectRatio: 2,
+                    child: Image.memory(
+                      message.photo!,
+                      fit: BoxFit.cover,
+                      gaplessPlayback: true,
+                    ),
+                  ),
                 ),
-              ),
+                const SizedBox(height: 6),
+              ],
+              if (message.aUnePosition) ...[
+                _CartePosition(
+                  latitude: message.latitude!,
+                  longitude: message.longitude!,
+                ),
+                const SizedBox(height: 6),
+              ],
+              // Une photo seule n'a pas besoin du mot « Photo » sous l'image.
+              if (message.photo == null)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    message.texte,
+                    style: Styles.gras(12.5, couleurTexte, hauteur: 1.5),
+                  ),
+                ),
               const SizedBox(height: 4),
               Text(
                 heureCourte(message.creeLe),
                 style: Styles.gras(9, couleurHeure, poids: FontWeight.w500),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Une petite carte avec l'épingle, pour une position reçue ou envoyée.
+class _CartePosition extends StatelessWidget {
+  const _CartePosition({required this.latitude, required this.longitude});
+
+  final double latitude;
+  final double longitude;
+
+  @override
+  Widget build(BuildContext context) {
+    final point = LatLng(latitude, longitude);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: AspectRatio(
+        aspectRatio: 2,
+        child: IgnorePointer(
+          child: FlutterMap(
+            options: MapOptions(
+              initialCenter: point,
+              initialZoom: 15,
+              interactionOptions: const InteractionOptions(
+                flags: InteractiveFlag.none,
+              ),
+            ),
+            children: [
+              tuilesCarte(context),
+              mentionCarte(petite: true),
+              MarkerLayer(
+                markers: [
+                  Marker(
+                    point: point,
+                    width: 30,
+                    height: 30,
+                    child: const Icon(
+                      Icons.location_on,
+                      size: 30,
+                      color: Couleurs.rouge,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -348,12 +479,16 @@ class _ZoneSaisie extends StatelessWidget {
     required this.cle,
     required this.envoiEnCours,
     required this.envoyer,
+    required this.envoyerPosition,
+    required this.envoyerPhoto,
   });
 
   final TextEditingController controleur;
   final GlobalKey<VibrantState> cle;
   final bool envoiEnCours;
   final VoidCallback envoyer;
+  final VoidCallback envoyerPosition;
+  final VoidCallback envoyerPhoto;
 
   @override
   Widget build(BuildContext context) {
@@ -443,14 +578,19 @@ class _ZoneSaisie extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          const Row(
+          Row(
             children: [
               _BoutonRaccourci(
                 icone: Icons.location_on_outlined,
                 texte: 'Localisation',
+                auAppui: envoyerPosition,
               ),
-              SizedBox(width: 14),
-              _BoutonRaccourci(icone: Icons.photo_camera, texte: 'Photo'),
+              const SizedBox(width: 14),
+              _BoutonRaccourci(
+                icone: Icons.photo_camera,
+                texte: 'Photo',
+                auAppui: envoyerPhoto,
+              ),
             ],
           ),
         ],
@@ -460,13 +600,22 @@ class _ZoneSaisie extends StatelessWidget {
 }
 
 class _BoutonRaccourci extends StatelessWidget {
-  const _BoutonRaccourci({required this.icone, required this.texte});
+  const _BoutonRaccourci({
+    required this.icone,
+    required this.texte,
+    required this.auAppui,
+  });
 
   final IconData icone;
   final String texte;
+  final VoidCallback auAppui;
 
   @override
   Widget build(BuildContext context) {
+    return GestureDetector(onTap: auAppui, child: _contenu());
+  }
+
+  Widget _contenu() {
     return Container(
       height: 30,
       padding: const EdgeInsets.symmetric(horizontal: 14),

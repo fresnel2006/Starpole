@@ -1,15 +1,20 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../application/couleurs.dart';
 import '../../noyau/normalisation.dart';
 import '../../noyau/service_auth.dart';
+import '../../partage/adaptatif.dart';
 import '../../partage/composants/bouton_google.dart';
 import '../../partage/composants/bouton_rouge.dart';
 import '../../partage/composants/case_a_cocher.dart';
 import '../../partage/composants/champ_texte.dart';
 import '../../partage/composants/separateur_ou.dart';
 import '../connexion/ecran_connexion.dart';
+import '../legal/ecran_texte_legal.dart';
+import '../otp/ecran_code_otp.dart';
+import '../legal/textes_legaux.dart';
 import '../principal/ecran_principal.dart';
 
 /// Page « Créer un compte » (fond rouge foncé).
@@ -31,8 +36,22 @@ class _EcranInscriptionState extends State<EcranInscription> {
   final GlobalKey<ChampTexteState> _cleIdentifiant = GlobalKey();
   final GlobalKey<CaseACocherState> _cleConditions = GlobalKey();
 
+  // Les deux liens soulignés de la case des conditions.
+  late final TapGestureRecognizer _lienConditions = TapGestureRecognizer()
+    ..onTap = () => _ouvrirTexte(conditionsUtilisation);
+  late final TapGestureRecognizer _lienConfidentialite = TapGestureRecognizer()
+    ..onTap = () => _ouvrirTexte(politiqueConfidentialite);
+
+  void _ouvrirTexte(TexteLegal texte) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => EcranTexteLegal(texte: texte)),
+    );
+  }
+
   @override
   void dispose() {
+    _lienConditions.dispose();
+    _lienConfidentialite.dispose();
     _nom.dispose();
     _identifiant.dispose();
     super.dispose();
@@ -44,7 +63,7 @@ class _EcranInscriptionState extends State<EcranInscription> {
       ..showSnackBar(SnackBar(content: Text(texte)));
   }
 
-  /// Vérifie les champs, puis crée le compte avec Firebase.
+  /// Vérifie les champs, puis demande le code de confirmation par e-mail.
   Future<void> _sInscrire() async {
     // Les champs vides vibrent et clignotent en rouge, sans message.
     final vides = <GlobalKey<ChampTexteState>>[
@@ -57,8 +76,13 @@ class _EcranInscriptionState extends State<EcranInscription> {
       }
       return;
     }
-    if (IdentifiantCompte.depuis(_identifiant.text) == null) {
+    final email = normaliserEmail(_identifiant.text);
+    if (!emailValide(email)) {
       _cleIdentifiant.currentState?.signalerErreur();
+      // Un numéro de téléphone est compris, mais pas encore accepté.
+      if (!ressembleAUnEmail(email) && normaliserTelephone(email).length >= 8) {
+        _afficherMessage(messageNumeroBientot);
+      }
       return;
     }
     if (!_conditionsAcceptees) {
@@ -69,18 +93,21 @@ class _EcranInscriptionState extends State<EcranInscription> {
     final auth = context.read<ServiceAuth>();
     setState(() => _enCours = true);
     try {
-      await auth.inscrire(nom: _nom.text, identifiant: _identifiant.text);
+      // Le serveur envoie un code par e-mail, qu'on saisit sur l'écran suivant.
+      await auth.demanderCode(email: email);
       if (!mounted) return;
-      await Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute<void>(builder: (_) => const EcranPrincipal()),
-        (_) => false,
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => EcranCodeOtp.parEmail(
+            titre: 'Création du compte',
+            auth: auth,
+            email: email,
+            nom: _nom.text,
+          ),
+        ),
       );
     } on ErreurAuth catch (e) {
       if (!mounted) return;
-      // Les champs concernés vibrent, et le message explique le problème.
-      if (e.champs.contains('email')) {
-        _cleIdentifiant.currentState?.signalerErreur();
-      }
       _afficherMessage(e.message);
     } finally {
       if (mounted) setState(() => _enCours = false);
@@ -124,7 +151,8 @@ class _EcranInscriptionState extends State<EcranInscription> {
   @override
   Widget build(BuildContext context) {
     final taille = MediaQuery.sizeOf(context);
-    final hauteur = taille.height;
+    // Sur un petit écran, la page défile au lieu de se tasser.
+    final hauteur = hauteurConception(context, 600);
     final gauche = taille.width * 0.077;
     final droite = taille.width * 0.083;
 
@@ -182,13 +210,18 @@ class _EcranInscriptionState extends State<EcranInscription> {
                   child: const Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Créer un compte',
-                        style: TextStyle(
-                          fontFamily: 'Poppins',
-                          fontSize: 28,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
+                      // Le titre rétrécit au lieu de passer sur 2 lignes.
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Créer un compte',
+                          style: TextStyle(
+                            fontFamily: 'Poppins',
+                            fontSize: 28,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          ),
                         ),
                       ),
                       SizedBox(height: 2),
@@ -229,7 +262,7 @@ class _EcranInscriptionState extends State<EcranInscription> {
                 // Acceptation des conditions.
                 placer(
                   0.498,
-                  44,
+                  70,
                   Row(
                     children: [
                       CaseACocher(
@@ -240,18 +273,20 @@ class _EcranInscriptionState extends State<EcranInscription> {
                       const SizedBox(width: 9),
                       Expanded(
                         child: Text.rich(
-                          const TextSpan(
+                          TextSpan(
                             style: _styleBlanc,
                             children: [
-                              TextSpan(text: "J'accepte les "),
+                              const TextSpan(text: "J'accepte les "),
                               TextSpan(
                                 text: "conditions d'utilisation",
                                 style: _styleLien,
+                                recognizer: _lienConditions,
                               ),
-                              TextSpan(text: ' et la '),
+                              const TextSpan(text: ' et la '),
                               TextSpan(
                                 text: 'politique de confidentialité',
                                 style: _styleLien,
+                                recognizer: _lienConfidentialite,
                               ),
                             ],
                           ),
@@ -278,7 +313,7 @@ class _EcranInscriptionState extends State<EcranInscription> {
                 // « Vous avez deja un compte ? Se connecter »
                 placer(
                   0.831,
-                  50,
+                  84,
                   Column(
                     children: [
                       const Text(

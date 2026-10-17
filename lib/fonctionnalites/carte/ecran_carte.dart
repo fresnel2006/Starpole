@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 
 import '../../application/couleurs.dart';
@@ -9,10 +7,11 @@ import '../../noyau/format_temps.dart';
 import '../../noyau/position_utilisateur.dart';
 import '../../noyau/service_alertes.dart';
 import '../../partage/composants/apparence_alerte.dart';
+import '../../partage/composants/carte_3d.dart';
 import '../../partage/styles.dart';
 import '../alertes/ecran_details_alerte.dart';
 
-/// Onglet Carte : carte OpenStreetMap, vraies alertes en repères colorés et
+/// Onglet Carte : carte Mapbox en 3D, vraies alertes en repères colorés et
 /// fiche de l'alerte choisie en bas.
 class EcranCarte extends StatefulWidget {
   const EcranCarte({super.key});
@@ -22,15 +21,32 @@ class EcranCarte extends StatefulWidget {
 }
 
 class _EcranCarteState extends State<EcranCarte> {
-  // Si on ne connaît pas la position, la carte s'ouvre sur le Plateau, à Abidjan.
-  static const LatLng _centreParDefaut = LatLng(5.3197, -4.0167);
-
   late final Stream<List<Alerte>> _flux = context
       .read<ServiceAlertes>()
       .alertes();
 
   /// L'alerte dont la fiche est affichée (choisie en appuyant sur un repère).
   String? _choisieId;
+
+  /// Le type d'alerte montré sur la carte (null : tous).
+  TypeAlerte? _filtre;
+
+  /// Feuille du bas : choisir le type d'alertes à montrer.
+  Future<void> _choisirFiltre() async {
+    final choix = await showModalBottomSheet<_ChoixFiltre>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) => _FeuilleFiltre(actuel: _filtre),
+    );
+    if (choix == null || !mounted) return;
+    setState(() {
+      _filtre = choix.type;
+      _choisieId = null;
+    });
+  }
 
   @override
   void initState() {
@@ -45,10 +61,6 @@ class _EcranCarteState extends State<EcranCarte> {
   @override
   Widget build(BuildContext context) {
     final lieu = context.watch<PositionUtilisateur>().lieu;
-    final positionConnue = lieu?.latitude != null && lieu?.longitude != null;
-    final centre = positionConnue
-        ? LatLng(lieu!.latitude!, lieu.longitude!)
-        : _centreParDefaut;
 
     return StreamBuilder<List<Alerte>>(
       stream: _flux,
@@ -59,6 +71,7 @@ class _EcranCarteState extends State<EcranCarte> {
               (a) =>
                   a.statut == StatutAlerte.enCours &&
                   a.aUnePosition &&
+                  (_filtre == null || a.type == _filtre) &&
                   (lieu == null || a.ville.isEmpty || a.ville == lieu.ville),
             )
             .toList();
@@ -71,42 +84,19 @@ class _EcranCarteState extends State<EcranCarte> {
 
         return Stack(
           children: [
+            // La carte 3D prend tout l'écran, sous le bandeau et la fiche.
             Positioned.fill(
-              child: FlutterMap(
-                options: MapOptions(initialCenter: centre, initialZoom: 13.5),
-                children: [
-                  TileLayer(
-                    urlTemplate:
-                        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                    userAgentPackageName: 'com.example.projet_starpole',
-                  ),
-                  MarkerLayer(
-                    markers: [
-                      for (final a in alertes)
-                        Marker(
-                          point: LatLng(a.latitude!, a.longitude!),
-                          width: 44,
-                          height: 52,
-                          alignment: Alignment.topCenter,
-                          child: GestureDetector(
-                            onTap: () => setState(() => _choisieId = a.id),
-                            child: Icon(
-                              Icons.location_on,
-                              size: a.id == choisie?.id ? 54 : 44,
-                              color: a.type.couleur,
-                            ),
-                          ),
-                        ),
-                      if (positionConnue)
-                        Marker(
-                          point: centre,
-                          width: 26,
-                          height: 26,
-                          child: const _PositionUtilisateur(),
-                        ),
-                    ],
-                  ),
-                ],
+              child: context.read<ConstructeurCarte>()(
+                context,
+                DonneesCarte(
+                  alertes: alertes,
+                  choisieId: choisie?.id,
+                  auChoix: (id) => setState(() => _choisieId = id),
+                  hautEntete: MediaQuery.paddingOf(context).top + 80,
+                  basFiche: choisie == null ? 90 : 235,
+                  latitude: lieu?.latitude,
+                  longitude: lieu?.longitude,
+                ),
               ),
             ),
             // Bandeau du haut : filtre et titre.
@@ -136,10 +126,36 @@ class _EcranCarteState extends State<EcranCarte> {
                 ),
                 child: Row(
                   children: [
-                    const Icon(
-                      Icons.filter_alt_outlined,
-                      size: 28,
-                      color: Colors.black,
+                    Semantics(
+                      button: true,
+                      label: 'Filtrer les alertes',
+                      child: GestureDetector(
+                        onTap: _choisirFiltre,
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            const Icon(
+                              Icons.filter_alt_outlined,
+                              size: 28,
+                              color: Colors.black,
+                            ),
+                            // Un point rouge rappelle qu'un filtre est actif.
+                            if (_filtre != null)
+                              Positioned(
+                                right: -2,
+                                top: -2,
+                                child: Container(
+                                  width: 10,
+                                  height: 10,
+                                  decoration: const BoxDecoration(
+                                    color: Couleurs.rouge,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
                     ),
                     Expanded(
                       child: Center(
@@ -176,18 +192,94 @@ class _EcranCarteState extends State<EcranCarte> {
   }
 }
 
-/// Le point bleu de la position de l'utilisateur.
-class _PositionUtilisateur extends StatelessWidget {
-  const _PositionUtilisateur();
+/// Ce que renvoie la feuille de filtre (un type, ou null pour « tous »).
+class _ChoixFiltre {
+  const _ChoixFiltre(this.type);
+
+  final TypeAlerte? type;
+}
+
+/// La feuille du bas pour choisir le type d'alertes de la carte.
+class _FeuilleFiltre extends StatelessWidget {
+  const _FeuilleFiltre({required this.actuel});
+
+  final TypeAlerte? actuel;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A73E8),
-        shape: BoxShape.circle,
-        border: Border.all(color: Colors.white, width: 3),
-        boxShadow: Styles.ombre,
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(22, 12, 22, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Couleurs.grisBordure,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            Text('Filtrer les alertes', style: Styles.gras(18, Colors.black)),
+            const SizedBox(height: 8),
+            _OptionFiltre(
+              texte: 'Toutes les alertes',
+              couleur: Colors.black,
+              choisie: actuel == null,
+              choix: const _ChoixFiltre(null),
+            ),
+            for (final type in TypeAlerte.values)
+              _OptionFiltre(
+                texte: type.libelle,
+                couleur: type.couleur,
+                choisie: actuel == type,
+                choix: _ChoixFiltre(type),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _OptionFiltre extends StatelessWidget {
+  const _OptionFiltre({
+    required this.texte,
+    required this.couleur,
+    required this.choisie,
+    required this.choix,
+  });
+
+  final String texte;
+  final Color couleur;
+  final bool choisie;
+  final _ChoixFiltre choix;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => Navigator.of(context).pop(choix),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        child: Row(
+          children: [
+            Container(
+              width: 18,
+              height: 18,
+              decoration: BoxDecoration(color: couleur, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 16),
+            Expanded(child: Text(texte, style: Styles.gras(15, Colors.black))),
+            if (choisie)
+              const Icon(Icons.check, size: 24, color: Couleurs.rouge),
+          ],
+        ),
       ),
     );
   }

@@ -26,7 +26,8 @@ class BarreNavigation extends StatelessWidget {
         clipBehavior: Clip.none,
         children: [
           Container(
-            height: 70,
+            // Au moins 70 : la barre grandit si le texte est agrandi.
+            constraints: const BoxConstraints(minHeight: 70),
             decoration: const BoxDecoration(
               color: Colors.white,
               boxShadow: [
@@ -126,10 +127,18 @@ class _Onglet extends StatelessWidget {
         onTap: auAppui,
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Icon(actif ? iconeActive : icone, size: 31, color: Couleurs.rouge),
             const SizedBox(height: 1),
-            Text(libelle, style: Styles.gras(10.5, Couleurs.rouge)),
+            // Le libellé rétrécit un peu au lieu de passer à la ligne.
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(libelle, style: Styles.gras(10.5, Couleurs.rouge)),
+              ),
+            ),
           ],
         ),
       ),

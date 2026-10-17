@@ -19,6 +19,11 @@ abstract final class Couleurs {
   static const Color vertVif = Color(0xFF1FA84A);
   static const Color rougeRose = Color(0xFFF5174B);
 
+  /// Couleurs des trois tuiles de type d'alerte (Urgence, Dons, Services).
+  static const Color tuileUrgence = Color(0xFFF4545B);
+  static const Color tuileDon = Color(0xFF2EA872);
+  static const Color tuileService = Color(0xFF3FB1E6);
+
   static const Color grisTexte = Color(0xFF555555);
   static const Color grisIndication = Color(0xFF8E8E8E);
   static const Color grisBordure = Color(0xFFE2E2E2);

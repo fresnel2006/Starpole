@@ -11,6 +11,8 @@ import '../noyau/service_carnet.dart';
 import '../noyau/service_localisation.dart';
 import '../noyau/service_messagerie.dart';
 import '../noyau/service_photo.dart';
+import '../partage/adaptatif.dart';
+import '../partage/composants/carte_3d.dart';
 
 /// Racine de l'application.
 class ApplicationStarPole extends StatelessWidget {
@@ -23,6 +25,7 @@ class ApplicationStarPole extends StatelessWidget {
     this.localisation,
     this.carnet,
     this.appels,
+    this.constructeurCarte,
   });
 
   /// Le service de compte (Firebase dans l'appli, un faux dans les tests).
@@ -46,6 +49,9 @@ class ApplicationStarPole extends StatelessWidget {
   /// Le service des appels voix et vidéo (un faux dans les tests).
   final ServiceAppel? appels;
 
+  /// La fabrique de la carte (une fausse carte dans les tests).
+  final ConstructeurCarte? constructeurCarte;
+
   @override
   Widget build(BuildContext context) {
     final servicePosition = localisation ?? ServiceLocalisationReel();
@@ -58,6 +64,9 @@ class ApplicationStarPole extends StatelessWidget {
         Provider<ServiceLocalisation>.value(value: servicePosition),
         Provider<ServiceCarnet>.value(value: carnet ?? ServiceCarnetReel()),
         Provider<ServiceAppel>.value(value: appels ?? ServiceAppelFirebase()),
+        Provider<ConstructeurCarte>.value(
+          value: constructeurCarte ?? construireCarte3d,
+        ),
         ChangeNotifierProvider(
           create: (_) => PositionUtilisateur(servicePosition),
         ),
@@ -66,6 +75,8 @@ class ApplicationStarPole extends StatelessWidget {
         title: 'StarPole',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(fontFamily: 'Poppins'),
+        // Largeur limitée sur grand écran, texte plafonné.
+        builder: cadreAdaptatif,
         // Déjà connecté : on va directement à l'accueil.
         home: auth.estConnecte
             ? const EcranPrincipal()

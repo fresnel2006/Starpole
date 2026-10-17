@@ -57,13 +57,19 @@ class BoutonGoogle extends StatelessWidget {
                     : const _LogoGoogle(),
               ),
               const SizedBox(width: 16),
-              Text(
-                libelle,
-                style: const TextStyle(
-                  fontFamily: 'Poppins',
-                  fontSize: 15.6,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.black,
+              // Le texte rétrécit un peu si la place manque (petit écran).
+              Flexible(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    libelle,
+                    style: const TextStyle(
+                      fontFamily: 'Poppins',
+                      fontSize: 15.6,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.black,
+                    ),
+                  ),
                 ),
               ),
             ],

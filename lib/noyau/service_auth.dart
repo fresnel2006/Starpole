@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -49,13 +51,17 @@ abstract class ServiceAuth {
   /// Vrai si quelqu'un est déjà connecté (la session est gardée par Firebase).
   bool get estConnecte;
 
-  /// Crée un compte avec un e-mail ou un numéro de téléphone (mode
-  /// démonstration, voir [IdentifiantCompte]), puis enregistre le profil dans
-  /// Firestore.
-  Future<void> inscrire({required String nom, required String identifiant});
+  /// Demande au serveur d'envoyer un code de confirmation à 4 chiffres à cette
+  /// adresse e-mail (pour s'inscrire ou se connecter).
+  Future<void> demanderCode({required String email});
 
-  /// Connexion avec un e-mail ou un numéro de téléphone.
-  Future<void> connecter({required String identifiant});
+  /// Vérifie le code reçu par e-mail puis connecte la personne. À la
+  /// première connexion, le compte est créé avec le [nom] donné.
+  Future<void> verifierCode({
+    required String email,
+    required String code,
+    String? nom,
+  });
 
   Future<void> deconnecter();
 
@@ -87,72 +93,77 @@ class ServiceAuthFirebase implements ServiceAuth {
   @override
   bool get estConnecte => _auth.currentUser != null;
 
-  IdentifiantCompte _lire(String saisie) {
-    final identifiant = IdentifiantCompte.depuis(saisie);
-    if (identifiant == null) {
-      throw const ErreurAuth(
-        'Entrez une adresse e-mail ou un numéro de téléphone valide.',
-        champs: {'email'},
+  /// L'adresse du serveur StarPole (FastAPI sur Vercel). Elle est publique.
+  static const String _serveur = 'https://starpole-backend.vercel.app';
+
+  /// Envoie une demande au serveur et renvoie sa réponse. Les erreurs du
+  /// serveur ont déjà un message en français, qui est repris tel quel.
+  Future<Map<String, dynamic>> _appelerServeur(
+    String chemin,
+    Map<String, dynamic> corps,
+  ) async {
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 20);
+    try {
+      final requete = await client.postUrl(Uri.parse('$_serveur$chemin'));
+      requete.headers.contentType = ContentType.json;
+      requete.write(jsonEncode(corps));
+      final reponse = await requete.close().timeout(
+        const Duration(seconds: 30),
       );
+      final texte = await reponse.transform(utf8.decoder).join();
+      Map<String, dynamic> donnees = {};
+      try {
+        donnees = jsonDecode(texte) as Map<String, dynamic>;
+      } catch (_) {
+        // Réponse inattendue : on garde un dictionnaire vide.
+      }
+      if (reponse.statusCode >= 400) {
+        throw ErreurAuth(
+          (donnees['erreur'] as String?) ??
+              'Le serveur a rencontré un problème. Réessayez.',
+        );
+      }
+      return donnees;
+    } on SocketException {
+      throw const ErreurAuth('Pas de connexion internet.');
+    } on TimeoutException {
+      throw const ErreurAuth('Le serveur ne répond pas. Réessayez.');
+    } on HandshakeException {
+      throw const ErreurAuth('Connexion au serveur impossible. Réessayez.');
+    } finally {
+      client.close();
     }
-    return identifiant;
   }
 
   @override
-  Future<void> inscrire({
-    required String nom,
-    required String identifiant,
+  Future<void> demanderCode({required String email}) async {
+    await _appelerServeur('/auth/demander-code', {
+      'email': normaliserEmail(email),
+    });
+  }
+
+  @override
+  Future<void> verifierCode({
+    required String email,
+    required String code,
+    String? nom,
   }) async {
-    final id = _lire(identifiant);
-    final UserCredential compte;
+    final donnees = await _appelerServeur('/auth/verifier-code', {
+      'email': normaliserEmail(email),
+      'code': code,
+      if (nom != null && nom.trim().isNotEmpty) 'nom': nom.trim(),
+    });
+    final jeton = donnees['jetonPersonnalise'] as String?;
+    if (jeton == null || jeton.isEmpty) {
+      throw const ErreurAuth('Connexion impossible. Réessayez.');
+    }
     try {
-      compte = await _auth.createUserWithEmailAndPassword(
-        email: id.emailInterne,
-        password: id.motDePasse,
-      );
+      // Le serveur a vérifié le code : ce jeton ouvre la session Firebase.
+      await _auth.signInWithCustomToken(jeton);
     } on FirebaseAuthException catch (e) {
       throw _erreur(e.code);
     }
-
-    final utilisateur = compte.user;
-    if (utilisateur == null) return;
-    await utilisateur.updateDisplayName(nom.trim());
-
-    // Le compte existe déjà à ce stade. Si l'écriture du profil échoue (réseau
-    // coupé par exemple), on laisse l'utilisateur entrer : chargerProfil()
-    // retombe alors sur le nom du compte.
-    try {
-      await _base.collection('utilisateurs').doc(utilisateur.uid).set({
-        'nom': nom.trim(),
-        'telephone': id.telephone,
-        'email': id.email,
-        // Formes comparables, utilisées par la recherche de contacts.
-        'telephoneNormalise': normaliserTelephone(id.telephone),
-        'emailNormalise': normaliserEmail(id.email),
-        'creeLe': FieldValue.serverTimestamp(),
-      });
-    } on FirebaseException {
-      // Volontairement ignoré, voir le commentaire ci-dessus.
-    }
-  }
-
-  @override
-  Future<void> connecter({required String identifiant}) async {
-    final id = _lire(identifiant);
-    try {
-      await _auth.signInWithEmailAndPassword(
-        email: id.emailInterne,
-        password: id.motDePasse,
-      );
-    } on FirebaseAuthException catch (e) {
-      throw _erreur(e.code);
-    }
-  }
-
-  /// L'e-mail du compte, sauf s'il s'agit de l'adresse interne d'un numéro.
-  String _emailVisible(User utilisateur) {
-    final email = utilisateur.email ?? '';
-    return email.endsWith('@telephone.starpole.app') ? '' : email;
   }
 
   @override
@@ -231,7 +242,7 @@ class ServiceAuthFirebase implements ServiceAuth {
         return ProfilUtilisateur(
           nom: (donnees['nom'] as String?) ?? utilisateur.displayName ?? '',
           telephone: (donnees['telephone'] as String?) ?? '',
-          email: (donnees['email'] as String?) ?? _emailVisible(utilisateur),
+          email: (donnees['email'] as String?) ?? (utilisateur.email ?? ''),
           photo: (photo == null || photo.isEmpty) ? null : base64Decode(photo),
           photoUrl: utilisateur.photoURL,
         );
@@ -241,7 +252,7 @@ class ServiceAuthFirebase implements ServiceAuth {
     }
     return ProfilUtilisateur(
       nom: utilisateur.displayName ?? '',
-      email: _emailVisible(utilisateur),
+      email: (utilisateur.email ?? ''),
       photoUrl: utilisateur.photoURL,
     );
   }
@@ -254,7 +265,7 @@ class ServiceAuthFirebase implements ServiceAuth {
       final ref = _base.collection('utilisateurs').doc(utilisateur.uid);
       final donnees = (await ref.get()).data() ?? <String, dynamic>{};
 
-      final email = (donnees['email'] as String?) ?? _emailVisible(utilisateur);
+      final email = (donnees['email'] as String?) ?? (utilisateur.email ?? '');
       final telephone = (donnees['telephone'] as String?) ?? '';
       final aJour =
           donnees['emailNormalise'] == normaliserEmail(email) &&

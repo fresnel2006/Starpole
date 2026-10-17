@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../application/couleurs.dart';
+import '../../partage/adaptatif.dart';
 import '../inscription/ecran_inscription.dart';
 
 /// Une page de l'écran d'infos de départ (seul le texte change).
@@ -79,7 +80,8 @@ class _EcranInfoDepartsState extends State<EcranInfoDeparts> {
   @override
   Widget build(BuildContext context) {
     final taille = MediaQuery.sizeOf(context);
-    final hauteur = taille.height;
+    // Sur un petit écran (ou en paysage), la page défile au lieu de se tasser.
+    final hauteur = hauteurConception(context, 600);
     // Le panneau blanc a son point le plus haut à 24 % de l'écran (renflement
     // à gauche) et rejoint le bord droit à 34 %, comme sur la maquette.
     final hautPanneau = hauteur * 0.24;
@@ -92,152 +94,160 @@ class _EcranInfoDepartsState extends State<EcranInfoDeparts> {
 
     return Scaffold(
       backgroundColor: Colors.white,
-      body: Stack(
-        children: [
-          // Photo d'arrière-plan.
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            height: hautPanneau + creux + 24,
-            child: Image.asset(
-              'assets/images/Infos_departs_photo_arriereplan.jpg',
-              fit: BoxFit.cover,
-              // Photo décalée vers le haut pour montrer le pont comme sur la maquette.
-              alignment: const Alignment(0, -0.37),
-            ),
-          ),
-          // Panneau blanc à bord supérieur courbe.
-          Positioned(
-            top: hautPanneau,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: ClipPath(
-              clipper: _DecoupeCourbe(creux: creux),
-              child: Container(
-                color: Colors.white,
-                padding: EdgeInsets.only(top: hauteur * 0.118),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Padding(
-                      padding: margesTexte,
-                      child: const _Titre(couleur: _couleurTitre),
-                    ),
-                    const SizedBox(height: 22),
-                    Expanded(
-                      child: Padding(
-                        padding: margesTexte,
-                        // Glisser vers la gauche ou la droite change de page.
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onHorizontalDragEnd: (details) {
-                            final vitesse = details.primaryVelocity ?? 0;
-                            if (vitesse < -200 && !_estDernierePage) {
-                              _allerA(_indexPage + 1);
-                            } else if (vitesse > 200 && _indexPage > 0) {
-                              _allerA(_indexPage - 1);
-                            }
-                          },
-                          // Le texte disparaît puis le suivant apparaît en fondu.
-                          child: AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 450),
-                            switchInCurve: Curves.easeIn,
-                            switchOutCurve: Curves.easeOut,
-                            layoutBuilder: (actuel, precedents) => Stack(
-                              alignment: Alignment.topLeft,
-                              children: [...precedents, ?actuel],
-                            ),
-                            child: Align(
-                              key: ValueKey(_indexPage),
-                              alignment: Alignment.topLeft,
-                              child: Text.rich(
-                                TextSpan(
-                                  style: _styleTexte,
-                                  children: _pages[_indexPage].description,
+      body: SingleChildScrollView(
+        child: SizedBox(
+          height: hauteur,
+          width: taille.width,
+          child: Stack(
+            children: [
+              // Photo d'arrière-plan.
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                height: hautPanneau + creux + 24,
+                child: Image.asset(
+                  'assets/images/Infos_departs_photo_arriereplan.jpg',
+                  fit: BoxFit.cover,
+                  // Photo décalée vers le haut pour montrer le pont comme sur la maquette.
+                  alignment: const Alignment(0, -0.37),
+                ),
+              ),
+              // Panneau blanc à bord supérieur courbe.
+              Positioned(
+                top: hautPanneau,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: ClipPath(
+                  clipper: _DecoupeCourbe(creux: creux),
+                  child: Container(
+                    color: Colors.white,
+                    padding: EdgeInsets.only(top: hauteur * 0.118),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: margesTexte,
+                          child: const _Titre(couleur: _couleurTitre),
+                        ),
+                        const SizedBox(height: 22),
+                        Expanded(
+                          child: Padding(
+                            padding: margesTexte,
+                            // Glisser vers la gauche ou la droite change de page.
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onHorizontalDragEnd: (details) {
+                                final vitesse = details.primaryVelocity ?? 0;
+                                if (vitesse < -200 && !_estDernierePage) {
+                                  _allerA(_indexPage + 1);
+                                } else if (vitesse > 200 && _indexPage > 0) {
+                                  _allerA(_indexPage - 1);
+                                }
+                              },
+                              // Le texte disparaît puis le suivant apparaît en fondu.
+                              child: AnimatedSwitcher(
+                                duration: const Duration(milliseconds: 450),
+                                switchInCurve: Curves.easeIn,
+                                switchOutCurve: Curves.easeOut,
+                                layoutBuilder: (actuel, precedents) => Stack(
+                                  alignment: Alignment.topLeft,
+                                  children: [...precedents, ?actuel],
+                                ),
+                                child: Align(
+                                  key: ValueKey(_indexPage),
+                                  alignment: Alignment.topLeft,
+                                  child: Text.rich(
+                                    TextSpan(
+                                      style: _styleTexte,
+                                      children: _pages[_indexPage].description,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
                           ),
                         ),
-                      ),
-                    ),
-                    Align(
-                      alignment: Alignment.center,
-                      child: _Points(
-                        nombre: _pages.length,
-                        indexActif: _indexPage,
-                        couleurInactif: _couleurPointInactif,
-                      ),
-                    ),
-                    SizedBox(height: math.max(hauteur * 0.092 - 26, 16)),
-                    Align(
-                      alignment: Alignment.center,
-                      child: _BoutonPrincipal(
-                        libelle: _estDernierePage ? "C'est parti !" : 'Suivant',
-                        auAppui: _suivant,
-                      ),
-                    ),
-                    // Réserve la place de « Passer » pour que le bouton ne
-                    // bouge pas d'une page à l'autre.
-                    SizedBox(
-                      height: 54,
-                      child: Center(
-                        child: _estDernierePage
-                            ? null
-                            : TextButton(
-                                onPressed: _terminer,
-                                child: const Text(
-                                  'Passer',
-                                  style: TextStyle(
-                                    fontFamily: 'Poppins',
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w700,
-                                    color: Couleurs.rouge,
+                        Align(
+                          alignment: Alignment.center,
+                          child: _Points(
+                            nombre: _pages.length,
+                            indexActif: _indexPage,
+                            couleurInactif: _couleurPointInactif,
+                          ),
+                        ),
+                        SizedBox(height: math.max(hauteur * 0.092 - 26, 16)),
+                        Align(
+                          alignment: Alignment.center,
+                          child: _BoutonPrincipal(
+                            libelle: _estDernierePage
+                                ? "C'est parti !"
+                                : 'Suivant',
+                            auAppui: _suivant,
+                          ),
+                        ),
+                        // Réserve la place de « Passer » pour que le bouton ne
+                        // bouge pas d'une page à l'autre.
+                        SizedBox(
+                          height: 54,
+                          child: Center(
+                            child: _estDernierePage
+                                ? null
+                                : TextButton(
+                                    onPressed: _terminer,
+                                    child: const Text(
+                                      'Passer',
+                                      style: TextStyle(
+                                        fontFamily: 'Poppins',
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w700,
+                                        color: Couleurs.rouge,
+                                      ),
+                                    ),
                                   ),
-                                ),
-                              ),
-                      ),
-                    ),
-                    SizedBox(
-                      height: math.max(
-                        hauteur * 0.08 - 22,
-                        MediaQuery.paddingOf(context).bottom,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          // Bouton retour (pages 2 et 3).
-          if (_indexPage > 0)
-            Positioned(
-              top: MediaQuery.paddingOf(context).top + 14,
-              left: 16,
-              child: Semantics(
-                button: true,
-                label: 'Retour',
-                child: GestureDetector(
-                  onTap: () => _allerA(_indexPage - 1),
-                  child: Container(
-                    width: 50,
-                    height: 50,
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.arrow_back,
-                      color: Couleurs.rouge,
-                      size: 24,
+                          ),
+                        ),
+                        SizedBox(
+                          height: math.max(
+                            hauteur * 0.08 - 22,
+                            MediaQuery.paddingOf(context).bottom,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
               ),
-            ),
-        ],
+              // Bouton retour (pages 2 et 3).
+              if (_indexPage > 0)
+                Positioned(
+                  top: MediaQuery.paddingOf(context).top + 14,
+                  left: 16,
+                  child: Semantics(
+                    button: true,
+                    label: 'Retour',
+                    child: GestureDetector(
+                      onTap: () => _allerA(_indexPage - 1),
+                      child: Container(
+                        width: 50,
+                        height: 50,
+                        decoration: const BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.arrow_back,
+                          color: Couleurs.rouge,
+                          size: 24,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }

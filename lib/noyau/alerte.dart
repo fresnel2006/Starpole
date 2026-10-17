@@ -44,33 +44,6 @@ enum StatutAlerte {
   }
 }
 
-/// Les catégories proposées pour chaque type d'alerte.
-abstract final class CategoriesAlerte {
-  static const Map<TypeAlerte, List<String>> parType = {
-    TypeAlerte.urgence: [
-      'Personne en detresse',
-      'Urgence medicale',
-      'Accident',
-      'Incendie',
-      'Securite',
-      'Autre urgence',
-    ],
-    TypeAlerte.don: [
-      'Don de vetement',
-      'Don de nourriture',
-      'Don de fournitures',
-      'Don de meubles',
-      'Autre don',
-    ],
-    TypeAlerte.service: [
-      'Coup de main',
-      'Objet perdu',
-      'Objet trouve',
-      'Autre service',
-    ],
-  };
-}
-
 /// Une alerte publiée par un utilisateur (urgence, don ou service).
 class Alerte {
   const Alerte({

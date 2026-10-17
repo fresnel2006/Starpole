@@ -1,18 +1,21 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart' show LatLng;
 import 'package:provider/provider.dart';
 
 import '../../application/couleurs.dart';
 import '../../noyau/alerte.dart';
 import '../../noyau/position_utilisateur.dart';
 import '../../noyau/service_alertes.dart';
+import '../../noyau/service_localisation.dart';
 import '../../noyau/service_photo.dart';
 import '../../partage/composants/apparence_alerte.dart';
 import '../../partage/composants/bouton_rouge.dart';
-import '../../partage/composants/choix_source_photo.dart';
-import '../../partage/composants/entete_retour.dart';
+import '../../partage/composants/puce.dart';
 import '../../partage/composants/vibrant.dart';
+import '../../partage/composants/couche_tuiles.dart';
 import '../../partage/styles.dart';
 
 /// Onglet « + » : formulaire pour poster une urgence, un don ou un service.
@@ -27,16 +30,18 @@ class EcranPosterAlerte extends StatefulWidget {
 }
 
 class _EcranPosterAlerteState extends State<EcranPosterAlerte> {
+  final TextEditingController _titre = TextEditingController();
   final TextEditingController _description = TextEditingController();
+  final GlobalKey<VibrantState> _cleTitre = GlobalKey();
   final GlobalKey<VibrantState> _cleDescription = GlobalKey();
 
   TypeAlerte _type = TypeAlerte.urgence;
-  late String _categorie = CategoriesAlerte.parType[_type]!.first;
   Uint8List? _photo;
   bool _enCours = false;
 
   @override
   void dispose() {
+    _titre.dispose();
     _description.dispose();
     super.dispose();
   }
@@ -47,23 +52,9 @@ class _EcranPosterAlerteState extends State<EcranPosterAlerte> {
       ..showSnackBar(SnackBar(content: Text(texte)));
   }
 
-  /// Change de type : la catégorie revient à la première du nouveau type.
-  void _choisirType(TypeAlerte type) {
-    setState(() {
-      _type = type;
-      _categorie = CategoriesAlerte.parType[type]!.first;
-    });
-  }
-
   Future<void> _choisirPhoto() async {
-    final source = await choisirSourcePhoto(
-      context,
-      titre: "Photo de l'alerte",
-    );
-    if (source == null || !mounted) return;
     try {
       final octets = await context.read<ServicePhoto>().choisir(
-        source,
         forme: FormePhoto.paysage,
       );
       if (octets != null && mounted) setState(() => _photo = octets);
@@ -74,9 +65,12 @@ class _EcranPosterAlerteState extends State<EcranPosterAlerte> {
 
   /// Vérifie le formulaire, puis enregistre l'alerte avec la vraie position.
   Future<void> _publier() async {
-    // Description vide : la zone vibre et clignote, sans message.
-    if (_description.text.trim().isEmpty) {
-      _cleDescription.currentState?.signalerErreur();
+    // Titre ou description vides : la zone vibre et clignote, sans message.
+    final titreVide = _titre.text.trim().isEmpty;
+    final descriptionVide = _description.text.trim().isEmpty;
+    if (titreVide || descriptionVide) {
+      if (titreVide) _cleTitre.currentState?.signalerErreur();
+      if (descriptionVide) _cleDescription.currentState?.signalerErreur();
       return;
     }
 
@@ -97,7 +91,8 @@ class _EcranPosterAlerteState extends State<EcranPosterAlerte> {
 
       await alertes.publier(
         type: _type,
-        categorie: _categorie,
+        // Le titre donné par la personne sert de titre à l'alerte.
+        categorie: _titre.text.trim(),
         description: _description.text,
         ville: lieu.ville,
         quartier: lieu.quartier,
@@ -106,11 +101,11 @@ class _EcranPosterAlerteState extends State<EcranPosterAlerte> {
         photo: _photo,
       );
       if (!mounted) return;
+      _titre.clear();
       _description.clear();
       setState(() {
         _photo = null;
         _type = TypeAlerte.urgence;
-        _categorie = CategoriesAlerte.parType[_type]!.first;
       });
       _afficherMessage('Alerte publiée.');
       widget.auRetour();
@@ -123,8 +118,8 @@ class _EcranPosterAlerteState extends State<EcranPosterAlerte> {
 
   @override
   Widget build(BuildContext context) {
+    final largeur = MediaQuery.sizeOf(context).width;
     final position = context.watch<PositionUtilisateur>();
-    final lieu = position.lieu;
 
     return SafeArea(
       bottom: false,
@@ -133,111 +128,229 @@ class _EcranPosterAlerteState extends State<EcranPosterAlerte> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            EnteteRetour(
-              titre: 'Poster une alerte',
-              auRetour: widget.auRetour,
-              tailleTitre: 16.5,
+            // En-tête : pastille, flèche et titre, texte, et la carte de la
+            // Côte d'Ivoire avec le mégaphone en haut à droite.
+            Stack(
+              children: [
+                Positioned(
+                  top: -4,
+                  right: -26,
+                  child: Image.asset(
+                    'assets/images/carte_cote_d_ivoire.png',
+                    width: largeur * 0.40,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Puce(
+                      texte: 'Nouvelle alerte',
+                      fond: Couleurs.fondPuceRouge,
+                      couleurTexte: Couleurs.rouge,
+                      taille: 11,
+                      ombre: true,
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        _BoutonRetour(auAppui: widget.auRetour),
+                        const SizedBox(width: 12),
+                        Flexible(
+                          child: Text.rich(
+                            TextSpan(
+                              style: Styles.gras(21, Colors.black),
+                              children: const [
+                                TextSpan(text: 'Poster une '),
+                                TextSpan(
+                                  text: 'alerte',
+                                  style: TextStyle(color: Couleurs.rouge),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                    ConstrainedBox(
+                      constraints: BoxConstraints(maxWidth: largeur * 0.74),
+                      child: Text(
+                        'Aidez votre communauté en signalant une situation '
+                        'urgente, aide nécessaire ou un service utile',
+                        style: Styles.gras(
+                          14,
+                          Couleurs.grisIndication,
+                          hauteur: 1.45,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
             const SizedBox(height: 26),
             Row(
               children: [
                 for (final type in TypeAlerte.values) ...[
-                  if (type != TypeAlerte.urgence) const SizedBox(width: 10),
+                  if (type != TypeAlerte.urgence) const SizedBox(width: 12),
                   Expanded(
                     child: _TuileType(
                       couleur: switch (type) {
-                        TypeAlerte.urgence => Couleurs.rouge,
-                        TypeAlerte.don => Couleurs.vert,
-                        TypeAlerte.service => Couleurs.bleu,
+                        TypeAlerte.urgence => Couleurs.tuileUrgence,
+                        TypeAlerte.don => Couleurs.tuileDon,
+                        TypeAlerte.service => Couleurs.tuileService,
                       },
-                      icone: switch (type) {
-                        TypeAlerte.urgence => type.icone(taille: 36),
-                        TypeAlerte.don => const Icon(
-                          Icons.volunteer_activism_outlined,
-                          size: 36,
-                          color: Colors.white,
-                        ),
-                        TypeAlerte.service => const Icon(
-                          Icons.room_service_outlined,
-                          size: 36,
-                          color: Colors.white,
-                        ),
-                      },
+                      icone: _iconeType(type, 38),
                       libelle: type.libelle,
                       choisie: type == _type,
-                      auAppui: () => _choisirType(type),
+                      auAppui: () => setState(() => _type = type),
                     ),
                   ),
                 ],
               ],
             ),
             const SizedBox(height: 22),
-            const _Titre('Catégorie'),
-            const SizedBox(height: 8),
-            _ChampCategorie(
-              icone: _type == TypeAlerte.urgence
-                  ? _type.icone(taille: 22)
-                  : Icon(
-                      _type == TypeAlerte.don
-                          ? Icons.volunteer_activism_outlined
-                          : Icons.room_service_outlined,
-                      size: 22,
-                      color: Colors.black,
+            // « Détails de l'alerte » : l'en-tête puis les champs.
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: switch (_type) {
+                          TypeAlerte.urgence => Couleurs.rouge,
+                          TypeAlerte.don => Couleurs.vert,
+                          TypeAlerte.service => Couleurs.bleu,
+                        },
+                        shape: BoxShape.circle,
+                      ),
+                      child: Center(child: _iconeType(_type, 22)),
                     ),
-              valeur: _categorie,
-              choix: CategoriesAlerte.parType[_type]!,
-              auChangement: (c) => setState(() => _categorie = c),
-            ),
-            const SizedBox(height: 18),
-            const _Titre('Description'),
-            const SizedBox(height: 8),
-            Vibrant(
-              key: _cleDescription,
-              child: _ChampDescription(controleur: _description),
-            ),
-            const SizedBox(height: 18),
-            const _Titre('Localisation'),
-            const SizedBox(height: 8),
-            _ChampPosition(
-              detail: lieu != null
-                  ? lieu.libelle
-                  : position.enRecherche
-                  ? 'Recherche de votre position...'
-                  : 'Position introuvable : appuyez pour réessayer',
-              auAppui: position.enRecherche ? null : position.actualiser,
-            ),
-            const SizedBox(height: 22),
-            _BoutonPhoto(
-              photo: _photo,
-              auAppui: _choisirPhoto,
-              auRetrait: () => setState(() => _photo = null),
-            ),
-            const SizedBox(height: 26),
-            BoutonRouge(
-              libelle: "Publier l'alerte",
-              enCours: _enCours,
-              auAppui: _publier,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "Détails de l'alerte",
+                            style: Styles.gras(15.5, Colors.black),
+                          ),
+                          Text(
+                            'Décrivez la situation en quelques phrases '
+                            'simples',
+                            style: Styles.gras(
+                              11.5,
+                              Couleurs.grisTexte,
+                              poids: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                Vibrant(
+                  key: _cleTitre,
+                  child: _ChampTitre(controleur: _titre),
+                ),
+                const SizedBox(height: 14),
+                Vibrant(
+                  key: _cleDescription,
+                  child: _ChampDescription(controleur: _description),
+                ),
+                const SizedBox(height: 14),
+                IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(
+                        child: _CartePosition(
+                          lieu: position.lieu,
+                          enRecherche: position.enRecherche,
+                          auAppui: position.enRecherche
+                              ? null
+                              : position.actualiser,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _CartePhoto(
+                          photo: _photo,
+                          auAppui: _choisirPhoto,
+                          auRetrait: () => setState(() => _photo = null),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+                BoutonRouge(
+                  libelle: "Publier l'alerte",
+                  enCours: _enCours,
+                  auAppui: _publier,
+                ),
+              ],
             ),
           ],
         ),
       ),
     );
   }
-}
 
-class _Titre extends StatelessWidget {
-  const _Titre(this.texte);
-
-  final String texte;
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(texte, style: Styles.gras(17, Colors.black));
+  /// L'icône blanche d'un type d'alerte.
+  Widget _iconeType(TypeAlerte type, double taille) {
+    return switch (type) {
+      TypeAlerte.urgence => type.icone(taille: taille),
+      TypeAlerte.don => Icon(
+        Icons.volunteer_activism_outlined,
+        size: taille,
+        color: Colors.white,
+      ),
+      TypeAlerte.service => Icon(
+        Icons.room_service_outlined,
+        size: taille,
+        color: Colors.white,
+      ),
+    };
   }
 }
 
-/// Tuile de type (Urgence, Dons, Services). La tuile choisie est en pleine
-/// couleur, les autres sont atténuées.
+/// Bouton rond blanc avec la flèche retour.
+class _BoutonRetour extends StatelessWidget {
+  const _BoutonRetour({required this.auAppui});
+
+  final VoidCallback auAppui;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: 'Retour',
+      child: GestureDetector(
+        onTap: auAppui,
+        child: Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            shape: BoxShape.circle,
+            border: Border.all(color: Couleurs.grisBordure),
+            boxShadow: Styles.ombre,
+          ),
+          child: const Icon(Icons.chevron_left, size: 28, color: Colors.black),
+        ),
+      ),
+    );
+  }
+}
+
+/// Tuile de type (Urgence, Dons, Services). La tuile choisie est cerclée de
+/// blanc et ombrée de sa couleur.
 class _TuileType extends StatelessWidget {
   const _TuileType({
     required this.couleur,
@@ -261,24 +374,33 @@ class _TuileType extends StatelessWidget {
       label: libelle,
       child: GestureDetector(
         onTap: auAppui,
-        child: AnimatedOpacity(
+        child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
-          opacity: choisie ? 1 : 0.45,
-          child: Container(
-            height: 104,
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            decoration: BoxDecoration(
-              color: couleur,
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: Styles.ombre,
+          height: 104,
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          decoration: BoxDecoration(
+            color: couleur,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: choisie ? Colors.white : Colors.transparent,
+              width: 3,
             ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                icone,
-                Text(libelle, style: Styles.gras(12.5, Colors.white)),
-              ],
-            ),
+            boxShadow: choisie
+                ? [
+                    BoxShadow(
+                      color: couleur.withValues(alpha: 0.55),
+                      blurRadius: 12,
+                      offset: const Offset(0, 5),
+                    ),
+                  ]
+                : Styles.ombre,
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              icone,
+              Text(libelle, style: Styles.gras(13, Colors.white)),
+            ],
           ),
         ),
       ),
@@ -286,119 +408,49 @@ class _TuileType extends StatelessWidget {
   }
 }
 
-/// Liste déroulante des catégories, dans un champ blanc arrondi.
-class _ChampCategorie extends StatelessWidget {
-  const _ChampCategorie({
-    required this.icone,
-    required this.valeur,
-    required this.choix,
-    required this.auChangement,
-  });
+/// Champ blanc arrondi du formulaire (ombre légère, bord gris).
+BoxDecoration _decorationChamp(double rayon) => BoxDecoration(
+  color: Colors.white,
+  borderRadius: BorderRadius.circular(rayon),
+  border: Border.all(color: Couleurs.grisBordure),
+  boxShadow: Styles.ombre,
+);
 
-  final Widget icone;
-  final String valeur;
-  final List<String> choix;
-  final ValueChanged<String> auChangement;
+class _ChampTitre extends StatelessWidget {
+  const _ChampTitre({required this.controleur});
+
+  final TextEditingController controleur;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 50,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Couleurs.grisBordure),
-        boxShadow: Styles.ombre,
-      ),
+      height: 48,
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      decoration: _decorationChamp(10),
       child: Row(
         children: [
-          SizedBox(width: 26, child: Center(child: icone)),
+          Text('#', style: Styles.gras(16, Colors.black)),
           const SizedBox(width: 12),
           Expanded(
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                value: valeur,
-                isExpanded: true,
-                dropdownColor: Colors.white,
-                borderRadius: BorderRadius.circular(14),
-                icon: const Icon(
-                  Icons.keyboard_arrow_down,
-                  size: 28,
-                  color: Colors.black,
-                ),
-                style: Styles.gras(12.5, Colors.black),
-                items: [
-                  for (final c in choix)
-                    DropdownMenuItem(value: c, child: Text(c)),
-                ],
-                onChanged: (c) {
-                  if (c != null) auChangement(c);
-                },
+            child: TextField(
+              controller: controleur,
+              maxLength: 50,
+              buildCounter: (
+                _, {
+                required currentLength,
+                required isFocused,
+                maxLength,
+              }) => null,
+              style: Styles.gras(12.5, Colors.black),
+              decoration: InputDecoration(
+                hintText: "Donner un titre à l'alerte",
+                hintStyle: Styles.gras(12, Couleurs.grisIndication),
+                border: InputBorder.none,
+                isDense: true,
               ),
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// Champ qui montre la position actuelle : un titre et, dessous, le lieu
-/// trouvé. Un appui cherche la position de nouveau.
-class _ChampPosition extends StatelessWidget {
-  const _ChampPosition({required this.detail, required this.auAppui});
-
-  final String detail;
-  final VoidCallback? auAppui;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: auAppui,
-      child: Container(
-        height: 56,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Couleurs.grisBordure),
-          boxShadow: Styles.ombre,
-        ),
-        child: Row(
-          children: [
-            const SizedBox(
-              width: 26,
-              child: Center(
-                child: Icon(
-                  Icons.location_on_outlined,
-                  size: 22,
-                  color: Colors.black,
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Ma position actuelle',
-                    style: Styles.gras(12.5, Colors.black),
-                  ),
-                  Text(
-                    detail,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Styles.gras(10.5, Couleurs.grisTexte),
-                  ),
-                ],
-              ),
-            ),
-            const Icon(Icons.my_location, size: 22, color: Colors.black),
-          ],
-        ),
       ),
     );
   }
@@ -412,43 +464,204 @@ class _ChampDescription extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 128,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Couleurs.grisBordure),
-        boxShadow: Styles.ombre,
+      height: 124,
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+      decoration: _decorationChamp(10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.only(top: 1),
+            child: Icon(Icons.draw, size: 22, color: Colors.black),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: TextField(
+              controller: controleur,
+              maxLines: null,
+              maxLength: 500,
+              buildCounter: (
+                _, {
+                required currentLength,
+                required isFocused,
+                maxLength,
+              }) => null,
+              expands: true,
+              textAlignVertical: TextAlignVertical.top,
+              style: Styles.gras(12.5, Colors.black),
+              decoration: InputDecoration(
+                hintText:
+                    "Décrivez la situation, ce qui s'est passé, ce dont vous "
+                    'avez besoin ...',
+                hintStyle: Styles.gras(12, Couleurs.grisIndication),
+                border: InputBorder.none,
+                isDense: true,
+              ),
+            ),
+          ),
+        ],
       ),
-      child: TextField(
-        controller: controleur,
-        maxLines: null,
-        maxLength: 500,
-        buildCounter: (
-          _, {
-          required currentLength,
-          required isFocused,
-          maxLength,
-        }) => null,
-        expands: true,
-        textAlignVertical: TextAlignVertical.top,
-        style: Styles.gras(12.5, Colors.black),
-        decoration: InputDecoration(
-          hintText: 'Decrivez la situation en queique phrase ...',
-          hintStyle: Styles.gras(12, Couleurs.grisIndication),
-          border: InputBorder.none,
-          isDense: true,
+    );
+  }
+}
+
+/// Petite carte blanche du bas du formulaire : une icône, un titre, une ligne
+/// d'explication et, en dessous, un contenu au format 2 pour 1.
+class _CartePetite extends StatelessWidget {
+  const _CartePetite({
+    required this.icone,
+    required this.titre,
+    required this.detail,
+    required this.contenu,
+  });
+
+  final IconData icone;
+  final String titre;
+  final String detail;
+  final Widget contenu;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: _decorationChamp(10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icone, size: 20, color: Couleurs.grisTexte),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Le titre rétrécit un peu au lieu d'être coupé.
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        titre,
+                        style: Styles.gras(11.5, Colors.black),
+                      ),
+                    ),
+                    Text(
+                      detail,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Styles.gras(
+                        9.5,
+                        Couleurs.grisTexte,
+                        poids: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          AspectRatio(aspectRatio: 2, child: contenu),
+        ],
+      ),
+    );
+  }
+}
+
+/// « Localisation » : la vraie position, sur une petite carte. Un appui
+/// cherche la position de nouveau.
+class _CartePosition extends StatelessWidget {
+  const _CartePosition({
+    required this.lieu,
+    required this.enRecherche,
+    required this.auAppui,
+  });
+
+  final LieuActuel? lieu;
+  final bool enRecherche;
+  final VoidCallback? auAppui;
+
+  @override
+  Widget build(BuildContext context) {
+    final latitude = lieu?.latitude;
+    final longitude = lieu?.longitude;
+    final Widget carte;
+    if (latitude != null && longitude != null) {
+      final point = LatLng(latitude, longitude);
+      carte = IgnorePointer(
+        child: FlutterMap(
+          options: MapOptions(
+            initialCenter: point,
+            initialZoom: 15,
+            interactionOptions: const InteractionOptions(
+              flags: InteractiveFlag.none,
+            ),
+          ),
+          children: [
+            tuilesCarte(context),
+            mentionCarte(petite: true),
+            MarkerLayer(
+              markers: [
+                Marker(
+                  point: point,
+                  width: 56,
+                  height: 56,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Container(
+                        decoration: BoxDecoration(
+                          color: Couleurs.rouge.withValues(alpha: 0.14),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const Icon(
+                        Icons.location_on,
+                        size: 30,
+                        color: Couleurs.rouge,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    } else {
+      carte = Container(
+        color: Couleurs.grisFond,
+        alignment: Alignment.center,
+        padding: const EdgeInsets.all(6),
+        child: Text(
+          enRecherche
+              ? 'Recherche de votre position...'
+              : 'Position introuvable. Appuyez pour réessayer.',
+          textAlign: TextAlign.center,
+          style: Styles.gras(9.5, Couleurs.grisTexte, poids: FontWeight.w500),
+        ),
+      );
+    }
+
+    return GestureDetector(
+      onTap: auAppui,
+      child: _CartePetite(
+        icone: Icons.location_on_outlined,
+        titre: 'Localisation',
+        detail: lieu != null ? lieu!.libelle : 'Ma localisation actuelle',
+        contenu: ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: carte,
         ),
       ),
     );
   }
 }
 
-/// Zone photo : tant qu'il n'y a pas de photo, le bouton « Ajouter une photo
-/// (optionnelle) ». Ensuite, un grand aperçu de la photo telle qu'elle sera
-/// publiée (coupée autour de son centre), avec de quoi la changer ou la retirer.
-class _BoutonPhoto extends StatelessWidget {
-  const _BoutonPhoto({
+/// « Ajouter une photo » : une zone en pointillés, qui devient l'aperçu de la
+/// photo telle qu'elle sera publiée (coupée en 2 pour 1 autour de son centre).
+class _CartePhoto extends StatelessWidget {
+  const _CartePhoto({
     required this.photo,
     required this.auAppui,
     required this.auRetrait,
@@ -460,95 +673,102 @@ class _BoutonPhoto extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final Widget contenu;
     if (photo != null) {
-      return Container(
-        clipBehavior: Clip.antiAlias,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: Styles.ombre,
-        ),
+      contenu = ClipRRect(
+        borderRadius: BorderRadius.circular(6),
         child: Stack(
+          fit: StackFit.expand,
           children: [
-            PhotoAlerte(photo: photo, ratio: 2),
+            Image.memory(
+              photo!,
+              fit: BoxFit.cover,
+              alignment: Alignment.center,
+              gaplessPlayback: true,
+            ),
             // Retirer la photo.
             Positioned(
-              top: 8,
-              right: 8,
+              top: 4,
+              right: 4,
               child: GestureDetector(
                 onTap: auRetrait,
                 child: Container(
-                  width: 34,
-                  height: 34,
+                  width: 24,
+                  height: 24,
                   decoration: const BoxDecoration(
                     color: Colors.white,
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.close, size: 22, color: Colors.black),
-                ),
-              ),
-            ),
-            // Changer la photo.
-            Positioned(
-              left: 8,
-              bottom: 8,
-              child: GestureDetector(
-                onTap: auAppui,
-                child: Container(
-                  height: 34,
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(17),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.photo_camera,
-                        size: 18,
-                        color: Colors.black,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Changer la photo',
-                        style: Styles.gras(12, Colors.black),
-                      ),
-                    ],
-                  ),
+                  child: const Icon(Icons.close, size: 16, color: Colors.black),
                 ),
               ),
             ),
           ],
         ),
       );
+    } else {
+      contenu = CustomPaint(
+        painter: _BordureTiretee(),
+        child: Container(
+          alignment: Alignment.center,
+          padding: const EdgeInsets.all(6),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.image_outlined, size: 22, color: Colors.black),
+              const SizedBox(height: 2),
+              Flexible(
+                child: Text(
+                  'Appuyer pour prendre une photo',
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Styles.gras(
+                    8.5,
+                    Couleurs.grisTexte,
+                    poids: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
     }
 
     return GestureDetector(
       onTap: auAppui,
-      child: Container(
-        height: 56,
-        padding: const EdgeInsets.symmetric(horizontal: 18),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Couleurs.grisBordure),
-          boxShadow: Styles.ombre,
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.photo_camera, size: 24, color: Colors.black),
-            const SizedBox(width: 22),
-            Expanded(
-              child: Text(
-                'Ajouter une photo (optionnelle)',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Styles.gras(13.5, Colors.black),
-              ),
-            ),
-          ],
-        ),
+      child: _CartePetite(
+        icone: Icons.photo_camera_outlined,
+        titre: 'Ajouter une photo',
+        detail: 'Prenez une photo',
+        contenu: contenu,
       ),
     );
   }
+}
+
+/// Contour en pointillés arrondi de la zone photo.
+class _BordureTiretee extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final trait = Paint()
+      ..color = Couleurs.grisIndication
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+    final forme = Path()
+      ..addRRect(
+        RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(6)),
+      );
+    for (final mesure in forme.computeMetrics()) {
+      var debut = 0.0;
+      while (debut < mesure.length) {
+        canvas.drawPath(mesure.extractPath(debut, debut + 4), trait);
+        debut += 7;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_BordureTiretee ancien) => false;
 }

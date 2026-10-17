@@ -109,6 +109,9 @@ class ServiceAppelFirebase implements ServiceAppel {
       moi: moi,
       estAppelant: true,
       video: video,
+      // Même identifiant de conversation que la messagerie : les deux
+      // identifiants triés, séparés par « _ ».
+      conversationId: ([moi, contact.id]..sort()).join('_'),
     );
     try {
       await session.preparer();
@@ -190,11 +193,15 @@ class _SessionWebRtc implements SessionAppel {
     required this.moi,
     required this.estAppelant,
     required this.video,
+    this.conversationId,
   });
 
   final DocumentReference<Map<String, dynamic>> ref;
   final String moi;
   final bool estAppelant;
+
+  /// La conversation avec l'autre personne (connue de l'appelant).
+  final String? conversationId;
 
   @override
   final bool video;
@@ -376,6 +383,32 @@ class _SessionWebRtc implements SessionAppel {
   void _signalerFin(String statut) {
     if (!_documentPret) return;
     ref.update({'statut': statut}).catchError((_) {});
+    // Sans réponse (ou annulé avant qu'on décroche) : l'autre personne verra
+    // « Appel manqué » dans la conversation en se connectant.
+    if (statut == 'manque' || statut == 'annule') _noterAppelManque();
+  }
+
+  /// Laisse un message « Appel manqué » dans la conversation, comme un message
+  /// envoyé par l'appelant (la liste montre alors qu'il y a du nouveau).
+  void _noterAppelManque() {
+    final id = conversationId;
+    if (id == null) return;
+    final base = FirebaseFirestore.instance;
+    final conversation = base.collection('conversations').doc(id);
+    final texte = video ? 'Appel vidéo manqué' : 'Appel vocal manqué';
+    final lot = base.batch();
+    lot.set(conversation.collection('messages').doc(), {
+      'texte': texte,
+      'auteurId': moi,
+      'creeLe': FieldValue.serverTimestamp(),
+    });
+    lot.update(conversation, {
+      'dernierMessage': texte,
+      'dernierAuteurId': moi,
+      'dernierTemps': FieldValue.serverTimestamp(),
+      'lu.$moi': FieldValue.serverTimestamp(),
+    });
+    lot.commit().catchError((_) {});
   }
 
   /// Coupe tout (son, image, connexion) et annonce l'état final.

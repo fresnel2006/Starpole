@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -87,6 +88,9 @@ class Message {
     required this.texte,
     required this.auteurId,
     required this.creeLe,
+    this.photo,
+    this.latitude,
+    this.longitude,
   });
 
   final String id;
@@ -94,14 +98,27 @@ class Message {
   final String auteurId;
   final DateTime creeLe;
 
+  /// La photo envoyée avec le message, s'il y en a une.
+  final Uint8List? photo;
+
+  /// La position envoyée avec le message, s'il y en a une.
+  final double? latitude;
+  final double? longitude;
+
+  bool get aUnePosition => latitude != null && longitude != null;
+
   factory Message.depuisDonnees(String id, Map<String, dynamic> d) {
     final date = d['creeLe'];
+    final photo = d['photo'] as String?;
     return Message(
       id: id,
       texte: (d['texte'] as String?) ?? '',
       auteurId: (d['auteurId'] as String?) ?? '',
       // Juste après l'envoi, la date du serveur n'est pas encore connue.
       creeLe: date is Timestamp ? date.toDate() : DateTime.now(),
+      photo: (photo == null || photo.isEmpty) ? null : base64Decode(photo),
+      latitude: (d['latitude'] as num?)?.toDouble(),
+      longitude: (d['longitude'] as num?)?.toDouble(),
     );
   }
 }

@@ -154,11 +154,20 @@ service cloud.firestore {
           && request.auth.uid in get(/databases/$(database)/documents/conversations/$(cid)).data.participants;
         allow create: if request.auth != null
           && request.auth.uid in get(/databases/$(database)/documents/conversations/$(cid)).data.participants
-          && request.resource.data.keys().hasOnly(['texte', 'auteurId', 'creeLe'])
+          && request.resource.data.keys().hasOnly(
+               ['texte', 'auteurId', 'creeLe', 'photo', 'latitude', 'longitude'])
           && request.resource.data.auteurId == request.auth.uid
           && request.resource.data.texte is string
           && request.resource.data.texte.size() > 0
-          && request.resource.data.texte.size() <= 1000;
+          && request.resource.data.texte.size() <= 1000
+          // Photo facultative (texte base64, environ 200 Ko au plus) et
+          // position facultative (les deux nombres ensemble).
+          && (!('photo' in request.resource.data)
+              || (request.resource.data.photo is string
+                  && request.resource.data.photo.size() < 300000))
+          && (!('latitude' in request.resource.data)
+              || (request.resource.data.latitude is number
+                  && request.resource.data.longitude is number));
         allow update, delete: if false;
       }
     }

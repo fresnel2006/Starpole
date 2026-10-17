@@ -63,10 +63,15 @@ class _EcranMessagerieState extends State<EcranMessagerie> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(
-                            'Messagerie',
-                            style: Styles.gras(24, Colors.black),
+                          Flexible(
+                            child: Text(
+                              'Messagerie',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Styles.gras(24, Colors.black),
+                            ),
                           ),
+                          const SizedBox(width: 10),
                           const Puce(
                             texte: "Appels d'urgence",
                             fond: Couleurs.fondPuceRouge,

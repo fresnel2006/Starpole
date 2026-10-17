@@ -15,7 +15,7 @@ import 'effet_creux.dart';
 class ChampTexte extends StatefulWidget {
   const ChampTexte({
     super.key,
-    required this.icone,
+    this.icone,
     required this.indication,
     this.masque = false,
     this.avecOeil = false,
@@ -24,9 +24,11 @@ class ChampTexte extends StatefulWidget {
     this.erreurEnRouge = false,
     this.modifiable = true,
     this.enCreux = false,
+    this.rayon = 14,
   });
 
-  final IconData icone;
+  /// L'icône à gauche (aucune si le champ est seul avec son texte).
+  final IconData? icone;
   final String indication;
   final bool masque;
   final bool avecOeil;
@@ -44,6 +46,9 @@ class ChampTexte extends StatefulWidget {
 
   /// Si vrai, le champ est gris « en creux » (pour saisir une nouvelle valeur).
   final bool enCreux;
+
+  /// Arrondi des coins du champ.
+  final double rayon;
 
   @override
   State<ChampTexte> createState() => ChampTexteState();
@@ -109,7 +114,7 @@ class ChampTexteState extends State<ChampTexte>
               const Color(0xFFFFD9D9),
               clignote,
             )!,
-            rayon: 14,
+            rayon: widget.rayon,
             padding: const EdgeInsets.symmetric(horizontal: 15),
             child: SizedBox(height: 50, child: enfant),
           );
@@ -123,7 +128,7 @@ class ChampTexteState extends State<ChampTexte>
                 const Color(0xFFFFD9D9),
                 clignote,
               ),
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(widget.rayon),
               border: Border.all(
                 color: Color.lerp(
                   const Color(0xFFE2E2E2),
@@ -157,8 +162,10 @@ class ChampTexteState extends State<ChampTexte>
           )!;
           return Row(
             children: [
-              Icon(widget.icone, size: 28, color: noir),
-              const SizedBox(width: 14),
+              if (widget.icone != null) ...[
+                Icon(widget.icone, size: 28, color: noir),
+                const SizedBox(width: 14),
+              ],
               Expanded(
                 child: TextField(
                   controller: widget.controleur,

@@ -4,11 +4,13 @@ import 'package:provider/provider.dart';
 import '../../application/couleurs.dart';
 import '../../noyau/normalisation.dart';
 import '../../noyau/service_auth.dart';
+import '../../partage/adaptatif.dart';
 import '../../partage/composants/bouton_google.dart';
 import '../../partage/composants/bouton_rouge.dart';
 import '../../partage/composants/champ_texte.dart';
 import '../../partage/composants/separateur_ou.dart';
 import '../inscription/ecran_inscription.dart';
+import '../otp/ecran_code_otp.dart';
 import '../principal/ecran_principal.dart';
 
 /// Page de connexion (fond blanc).
@@ -38,30 +40,36 @@ class _EcranConnexionState extends State<EcranConnexion> {
       ..showSnackBar(SnackBar(content: Text(texte)));
   }
 
-  /// Vérifie les champs, puis connecte l'utilisateur avec Firebase.
+  /// Vérifie le champ, puis demande le code de confirmation par e-mail.
   Future<void> _seConnecter() async {
-    final identifiant = _identifiant.text.trim();
-    // Un champ vide ou incorrect vibre et clignote en rouge, sans message.
-    if (identifiant.isEmpty || IdentifiantCompte.depuis(identifiant) == null) {
+    final email = normaliserEmail(_identifiant.text);
+    // Un champ vide ou incorrect vibre et clignote en rouge.
+    if (!emailValide(email)) {
       _cleIdentifiant.currentState?.signalerErreur();
+      // Un numéro de téléphone est compris, mais pas encore accepté.
+      if (!ressembleAUnEmail(email) && normaliserTelephone(email).length >= 8) {
+        _afficherMessage(messageNumeroBientot);
+      }
       return;
     }
 
     final auth = context.read<ServiceAuth>();
     setState(() => _enCours = true);
     try {
-      await auth.connecter(identifiant: identifiant);
+      await auth.demanderCode(email: email);
       if (!mounted) return;
-      await Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute<void>(builder: (_) => const EcranPrincipal()),
-        (_) => false,
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => EcranCodeOtp.parEmail(
+            titre: 'Connexion',
+            auth: auth,
+            email: email,
+          ),
+        ),
       );
     } on ErreurAuth catch (e) {
       if (!mounted) return;
-      // Les champs concernés vibrent, et le message explique le problème.
-      if (e.champs.contains('email')) {
-        _cleIdentifiant.currentState?.signalerErreur();
-      }
+      _cleIdentifiant.currentState?.signalerErreur();
       _afficherMessage(e.message);
     } finally {
       if (mounted) setState(() => _enCours = false);
@@ -89,7 +97,8 @@ class _EcranConnexionState extends State<EcranConnexion> {
   @override
   Widget build(BuildContext context) {
     final taille = MediaQuery.sizeOf(context);
-    final hauteur = taille.height;
+    // Sur un petit écran, la page défile au lieu de se tasser.
+    final hauteur = hauteurConception(context, 600);
     final gauche = taille.width * 0.066;
     final droite = taille.width * 0.08;
 
@@ -130,7 +139,7 @@ class _EcranConnexionState extends State<EcranConnexion> {
                 ),
                 placer(
                   0.243,
-                  40,
+                  64,
                   const Center(
                     child: Text(
                       'StarPole',
@@ -146,7 +155,7 @@ class _EcranConnexionState extends State<EcranConnexion> {
                 ),
                 placer(
                   0.354,
-                  34,
+                  52,
                   const Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
@@ -208,7 +217,7 @@ class _EcranConnexionState extends State<EcranConnexion> {
                 // « Vous n'avez pas de compte ? S'inscrire »
                 placer(
                   0.84,
-                  50,
+                  84,
                   Column(
                     children: [
                       const Text(

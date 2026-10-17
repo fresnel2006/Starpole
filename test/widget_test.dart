@@ -3,12 +3,14 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:projet_starpole/application/application.dart';
 import 'package:projet_starpole/noyau/alerte.dart';
+import 'package:projet_starpole/partage/composants/carte_3d.dart';
 import 'package:projet_starpole/noyau/appel.dart';
 import 'package:projet_starpole/noyau/messagerie.dart';
 import 'package:projet_starpole/noyau/normalisation.dart';
@@ -29,10 +31,13 @@ import 'package:projet_starpole/partage/composants/vibrant.dart';
 
 /// Faux service de compte.
 class FausseAuth implements ServiceAuth {
-  FausseAuth({this.erreur});
+  FausseAuth({this.erreur, this.codeValide = '1234'});
 
-  /// Si renseigné, l'inscription et la connexion échouent avec ce message.
-  final String? erreur;
+  /// Si renseigné, la demande de code échoue avec ce message.
+  String? erreur;
+
+  /// Le seul code accepté par la vérification.
+  final String codeValide;
 
   final List<String> appels = [];
 
@@ -54,22 +59,25 @@ class FausseAuth implements ServiceAuth {
   bool get estConnecte => false;
 
   @override
-  Future<void> inscrire({
-    required String nom,
-    required String identifiant,
+  Future<void> demanderCode({required String email}) async {
+    appels.add('demander:$email');
+    if (erreur != null) throw ErreurAuth(erreur!);
+  }
+
+  @override
+  Future<void> verifierCode({
+    required String email,
+    required String code,
+    String? nom,
   }) async {
-    appels.add('inscrire:$nom:$identifiant');
-    if (erreur != null) throw ErreurAuth(erreur!);
+    appels.add('verifier:$email:$code:${nom ?? ''}');
+    if (code != codeValide) throw const ErreurAuth('Code incorrect.');
   }
 
   @override
-  Future<void> connecter({required String identifiant}) async {
-    appels.add('connecter:$identifiant');
-    if (erreur != null) throw ErreurAuth(erreur!);
+  Future<void> deconnecter() async {
+    appels.add('deconnecter');
   }
-
-  @override
-  Future<void> deconnecter() async {}
 
   @override
   Future<bool> connecterAvecGoogle() async {
@@ -387,14 +395,25 @@ class FausseMessagerie implements ServiceMessagerie {
       _flux(() => List.of(_messages[conversationId] ?? const []));
 
   @override
-  Future<void> envoyerMessage(String conversationId, String texte) async {
+  Future<void> envoyerMessage(
+    String conversationId,
+    String texte, {
+    Uint8List? photo,
+    double? latitude,
+    double? longitude,
+  }) async {
     actions.add('message:$conversationId:$texte');
+    if (photo != null) actions.add('photo:$conversationId');
+    if (latitude != null) actions.add('position:$conversationId:$latitude');
     (_messages[conversationId] ??= []).add(
       Message(
         id: 'm${_messages[conversationId]!.length}',
         texte: texte,
         auteurId: 'moi',
         creeLe: DateTime.now(),
+        photo: photo,
+        latitude: latitude,
+        longitude: longitude,
       ),
     );
     _changement.add(null);
@@ -449,6 +468,24 @@ class FausseCarnet implements ServiceCarnet {
   Future<void> ouvrirReglages() async {
     reglagesOuverts++;
   }
+
+  /// Les personnes « enregistrées dans le téléphone », par le formulaire.
+  final List<String> enregistres = [];
+
+  /// Ce que répond l'enregistrement (ok, refusé ou bloqué).
+  EtatCarnet etatEnregistrement = EtatCarnet.ok;
+
+  @override
+  Future<EtatCarnet> enregistrer({
+    required String prenom,
+    String nom = '',
+    required String numero,
+  }) async {
+    if (etatEnregistrement == EtatCarnet.ok) {
+      enregistres.add('$prenom|$nom|$numero');
+    }
+    return etatEnregistrement;
+  }
 }
 
 /// Fausse position : renvoie le résultat voulu, sans toucher au GPS.
@@ -483,15 +520,10 @@ class FausseLocalisation implements ServiceLocalisation {
 
 /// Faux choix de photo : renvoie tout de suite une minuscule image PNG.
 class FausseSelectionPhoto implements ServicePhoto {
-  final List<SourcePhoto> sources = [];
   final List<FormePhoto> formes = [];
 
   @override
-  Future<Uint8List?> choisir(
-    SourcePhoto source, {
-    FormePhoto forme = FormePhoto.carre,
-  }) async {
-    sources.add(source);
+  Future<Uint8List?> choisir({FormePhoto forme = FormePhoto.carre}) async {
     formes.add(forme);
     return base64Decode(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
@@ -571,9 +603,13 @@ Future<void> allerALInscription(
   ServiceMessagerie? messagerie,
   ServiceCarnet? carnet,
   ServiceAppel? appels,
+  Size taille = const Size(390, 844),
+  double echelleTexte = 1,
 }) async {
   await chargerPoppins();
-  tester.view.physicalSize = const Size(780, 1688);
+  tester.view.physicalSize = taille * 2;
+  tester.platformDispatcher.textScaleFactorTestValue = echelleTexte;
+  addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
   tester.view.devicePixelRatio = 2;
   addTearDown(tester.view.reset);
 
@@ -584,14 +620,19 @@ Future<void> allerALInscription(
       messagerie: messagerie ?? FausseMessagerie(),
       carnet: carnet ?? FausseCarnet(),
       appels: appels ?? FausseAppel(),
+      constructeurCarte: carteDeTest,
       photos: photos,
       localisation: localisation ?? FausseLocalisation(),
     ),
   );
+  // Sur un petit écran, la page défile : on amène chaque bouton à l'écran.
+  await tester.ensureVisible(find.text('Suivant'));
   await tester.tap(find.text('Suivant'));
   await tester.pumpAndSettle();
+  await tester.ensureVisible(find.text('Suivant'));
   await tester.tap(find.text('Suivant'));
   await tester.pumpAndSettle();
+  await tester.ensureVisible(find.text("C'est parti !"));
   await tester.tap(find.text("C'est parti !"));
   await tester.pumpAndSettle();
   expect(find.text('Créer un compte'), findsOneWidget);
@@ -607,22 +648,27 @@ Future<void> remplirInscription(WidgetTester tester) async {
 /// Inscription complète : on arrive sur l'accueil.
 Future<void> sInscrire(WidgetTester tester) async {
   await remplirInscription(tester);
+  await tester.ensureVisible(find.byType(CaseACocher));
   await tester.tap(find.byType(CaseACocher));
+  await tester.ensureVisible(find.text("S'inscrire").last);
   await tester.tap(find.text("S'inscrire").last);
+  await tester.pumpAndSettle();
+  // Le code reçu par e-mail est saisi sur l'écran suivant.
+  await tester.enterText(find.byType(TextField), '1234');
   await tester.pumpAndSettle();
   // On est arrivé sur l'accueil.
   expect(find.text("Types d'alerte"), findsOneWidget);
 }
 
 void main() {
-  testWidgets("Inscription : vérifications puis arrivée sur l'accueil", (
+  testWidgets("Inscription : vérifications, code par e-mail puis accueil", (
     tester,
   ) async {
     final auth = FausseAuth();
     await allerALInscription(tester, auth);
 
-    // Champs vides : ils vibrent et clignotent, sans message, et aucun
-    // compte n'est créé.
+    // Champs vides : ils vibrent et clignotent, sans message, et aucun code
+    // n'est demandé.
     await tester.tap(find.text("S'inscrire").last);
     await tester.pump();
     for (var i = 0; i < 2; i++) {
@@ -635,7 +681,7 @@ void main() {
     expect(auth.appels, isEmpty);
     await tester.pumpAndSettle();
 
-    // Un identifiant qui n'est ni un e-mail ni un numéro fait vibrer le champ.
+    // Une adresse invalide fait vibrer le champ.
     await tester.enterText(find.byType(TextField).at(0), 'Ange Fresnel');
     await tester.enterText(find.byType(TextField).at(1), 'abc');
     await tester.tap(find.byType(CaseACocher));
@@ -645,6 +691,14 @@ void main() {
       tester.state<ChampTexteState>(find.byType(ChampTexte).at(1)).enErreur,
       isTrue,
     );
+    expect(auth.appels, isEmpty);
+    await tester.pumpAndSettle();
+
+    // Un numéro de téléphone : le champ vibre et un message explique.
+    await tester.enterText(find.byType(TextField).at(1), '07 07 07 07 07');
+    await tester.tap(find.text("S'inscrire").last);
+    await tester.pump();
+    expect(find.text(messageNumeroBientot), findsOneWidget);
     expect(auth.appels, isEmpty);
     await tester.pumpAndSettle();
     await tester.tap(find.byType(CaseACocher)); // on décoche
@@ -657,22 +711,36 @@ void main() {
       tester.state<CaseACocherState>(find.byType(CaseACocher)).enErreur,
       isTrue,
     );
-    expect(find.byType(SnackBar), findsNothing);
     expect(auth.appels, isEmpty);
     await tester.pumpAndSettle();
 
-    // Tout est bon : le compte est créé et on arrive sur l'accueil.
+    // Tout est bon : un code est demandé et l'écran du code s'ouvre.
     await tester.tap(find.byType(CaseACocher));
     await tester.tap(find.text("S'inscrire").last);
     await tester.pumpAndSettle();
-    expect(auth.appels, ['inscrire:Ange Fresnel:fresnel@exemple.ci']);
+    expect(auth.appels, ['demander:fresnel@exemple.ci']);
+    expect(find.text('Création du compte'), findsOneWidget);
+    expect(find.text('Saisie du code OTP envoyé'), findsOneWidget);
+
+    // Un mauvais code est refusé, puis le bon code ouvre l'accueil.
+    await tester.enterText(find.byType(TextField), '9999');
+    await tester.pumpAndSettle();
+    expect(find.text('Code incorrect.'), findsOneWidget);
+    expect(find.text("Types d'alerte"), findsNothing);
+    await tester.enterText(find.byType(TextField), '1234');
+    await tester.pumpAndSettle();
+    expect(auth.appels, [
+      'demander:fresnel@exemple.ci',
+      'verifier:fresnel@exemple.ci:9999:Ange Fresnel',
+      'verifier:fresnel@exemple.ci:1234:Ange Fresnel',
+    ]);
     expect(find.text('Abidjan, Plateau'), findsOneWidget);
   });
 
-  testWidgets("Connexion : message d'erreur de Firebase puis succès", (
+  testWidgets("Connexion : erreur du serveur, puis code reçu par e-mail", (
     tester,
   ) async {
-    final auth = FausseAuth(erreur: 'E-mail ou mot de passe incorrect.');
+    final auth = FausseAuth(erreur: 'Le serveur ne répond pas. Réessayez.');
     await allerALInscription(tester, auth);
 
     await tester.tap(find.text('Se connecter'));
@@ -702,7 +770,7 @@ void main() {
       isFalse,
     );
 
-    // Ni un e-mail ni un numéro : le champ vibre, aucune connexion.
+    // Pas une adresse : le champ vibre, aucun code n'est demandé.
     await tester.tap(find.text('Se connecter').last);
     await tester.pump();
     expect(
@@ -712,22 +780,30 @@ void main() {
     expect(auth.appels, isEmpty);
     await tester.pumpAndSettle();
 
-    // Une erreur de Firebase s'affiche et on reste sur la connexion.
+    // Un numéro de téléphone n'est pas encore accepté.
     final champs = find.byType(TextField);
-    await tester.enterText(champs.at(0), 'fresnel@exemple.ci');
-    await tester.tap(find.text('Se connecter').last);
-    await tester.pumpAndSettle();
-    expect(find.text('E-mail ou mot de passe incorrect.'), findsOneWidget);
-    expect(find.text('Connexion'), findsOneWidget);
-
-    // Un numéro de téléphone est accepté aussi.
     await tester.enterText(champs.at(0), '07 07 07 07 07');
     await tester.tap(find.text('Se connecter').last);
     await tester.pumpAndSettle();
-    expect(auth.appels, [
-      'connecter:fresnel@exemple.ci',
-      'connecter:07 07 07 07 07',
-    ]);
+    expect(find.text(messageNumeroBientot), findsOneWidget);
+    expect(auth.appels, isEmpty);
+
+    // Une erreur du serveur s'affiche et on reste sur la connexion.
+    await tester.enterText(champs.at(0), 'fresnel@exemple.ci');
+    await tester.tap(find.text('Se connecter').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Le serveur ne répond pas. Réessayez.'), findsOneWidget);
+    expect(auth.appels, ['demander:fresnel@exemple.ci']);
+
+    // Le serveur répond : l'écran du code s'ouvre, et le bon code connecte.
+    auth.erreur = null;
+    await tester.tap(find.text('Se connecter').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Saisie du code OTP envoyé'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), '1234');
+    await tester.pumpAndSettle();
+    expect(auth.appels.last, 'verifier:fresnel@exemple.ci:1234:');
+    expect(find.text("Types d'alerte"), findsOneWidget);
   });
 
   testWidgets('Google : fenêtre fermée, erreur, puis connexion réussie', (
@@ -896,33 +972,33 @@ void main() {
     await tester.tap(find.byIcon(Icons.add));
     await tester.pumpAndSettle();
     expect(find.text('Poster une alerte'), findsOneWidget);
-    expect(find.text('Ma position actuelle'), findsOneWidget);
+    expect(find.text('Localisation'), findsOneWidget);
     expect(find.text('Abidjan, Plateau'), findsOneWidget);
 
-    // Je choisis « Dons » : la catégorie change.
+    // Je choisis « Dons », je donne un titre et je décris.
     await tester.tap(find.text('Dons'));
     await tester.pumpAndSettle();
-    expect(find.text('Don de vetement'), findsOneWidget);
-
+    await tester.enterText(find.byType(TextField).at(0), 'Don de vetements');
     await tester.enterText(
-      find.byType(TextField).first,
+      find.byType(TextField).at(1),
       'Des vetements pour enfants',
     );
+    await tester.ensureVisible(find.text("Publier l'alerte"));
     await tester.tap(find.text("Publier l'alerte"));
     await tester.pumpAndSettle();
 
-    // L'alerte est enregistrée avec le type, la ville et le quartier.
-    expect(alertes.actions, ['publier:Don de vetement:don:Abidjan:Plateau']);
+    // L'alerte est enregistrée avec le titre, le type, la ville et le quartier.
+    expect(alertes.actions, ['publier:Don de vetements:don:Abidjan:Plateau']);
     expect(alertes.publiees.single.description, 'Des vetements pour enfants');
     expect(alertes.publiees.single.latitude, 5.3197);
 
     // On revient à l'accueil, où la nouvelle alerte apparaît.
     expect(find.text('Alerte publiée.'), findsOneWidget);
     expect(find.text('3 Alertes'), findsOneWidget);
-    expect(find.text('Don de vetement'), findsOneWidget);
+    expect(find.text('Don de vetements'), findsOneWidget);
   });
 
-  testWidgets('Poster une alerte : description vide, la zone vibre', (
+  testWidgets('Poster une alerte : titre ou description vide, ça vibre', (
     tester,
   ) async {
     final alertes = FausseAlertes(initiales: alertesDeDepart());
@@ -931,11 +1007,35 @@ void main() {
 
     await tester.tap(find.byIcon(Icons.add));
     await tester.pumpAndSettle();
+
+    // Tout est vide : le titre et la description vibrent, sans message.
+    await tester.ensureVisible(find.text("Publier l'alerte"));
     await tester.tap(find.text("Publier l'alerte"));
     await tester.pump();
-
-    expect(tester.state<VibrantState>(find.byType(Vibrant)).enErreur, isTrue);
+    expect(
+      tester.state<VibrantState>(find.byType(Vibrant).at(0)).enErreur,
+      isTrue,
+    );
+    expect(
+      tester.state<VibrantState>(find.byType(Vibrant).at(1)).enErreur,
+      isTrue,
+    );
     expect(find.byType(SnackBar), findsNothing);
+    expect(alertes.actions, isEmpty);
+    await tester.pumpAndSettle();
+
+    // Titre rempli, description vide : seule la description vibre.
+    await tester.enterText(find.byType(TextField).at(0), 'Un titre');
+    await tester.tap(find.text("Publier l'alerte"));
+    await tester.pump();
+    expect(
+      tester.state<VibrantState>(find.byType(Vibrant).at(0)).enErreur,
+      isFalse,
+    );
+    expect(
+      tester.state<VibrantState>(find.byType(Vibrant).at(1)).enErreur,
+      isTrue,
+    );
     expect(alertes.actions, isEmpty);
     await tester.pumpAndSettle();
   });
@@ -957,7 +1057,12 @@ void main() {
 
     await tester.tap(find.byIcon(Icons.add));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField).first, 'Au secours');
+    await tester.enterText(find.byType(TextField).at(0), 'Au secours');
+    await tester.enterText(
+      find.byType(TextField).at(1),
+      'Une personne a besoin',
+    );
+    await tester.ensureVisible(find.text("Publier l'alerte"));
     await tester.tap(find.text("Publier l'alerte"));
     await tester.pumpAndSettle();
 
@@ -1030,18 +1135,18 @@ void main() {
     await tester.tap(find.text('Profil'));
     await tester.pumpAndSettle();
 
-    // Le crayon ouvre le choix : appareil photo ou galerie.
+    // Le crayon du profil ouvre la page « Modification », où le crayon de la
+    // photo ouvre directement le sélecteur de photos, sans autre choix.
     await tester.tap(find.byIcon(Icons.edit));
     await tester.pumpAndSettle();
-    expect(find.text('Prendre une photo'), findsOneWidget);
-    expect(find.text('Choisir dans la galerie'), findsOneWidget);
-
-    // La photo choisie dans la galerie est enregistrée.
-    await tester.tap(find.text('Choisir dans la galerie'));
+    expect(find.text('Modification'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.edit));
     await tester.pumpAndSettle();
-    expect(photos.sources, [SourcePhoto.galerie]);
+    expect(find.text('Prendre une photo'), findsNothing);
+    expect(find.text('Choisir dans la galerie'), findsNothing);
+    expect(photos.formes, [FormePhoto.carre]);
     expect(auth.photosEnvoyees, hasLength(1));
-    expect(find.text('Mon profil'), findsOneWidget);
+    expect(find.text('Modification'), findsOneWidget);
   });
 
   testWidgets("Accueil : la position s'affiche, ou dit quoi faire", (
@@ -1054,6 +1159,8 @@ void main() {
     await remplirInscription(tester);
     await tester.tap(find.byType(CaseACocher));
     await tester.tap(find.text("S'inscrire").last);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '1234');
     await tester.pumpAndSettle();
 
     // L'autorisation est bloquée : l'en-tête le dit.
@@ -1150,31 +1257,28 @@ void main() {
     await tester.tap(find.byIcon(Icons.add));
     await tester.pumpAndSettle();
 
-    // Pas de photo : le bouton propose d'en ajouter une.
-    expect(find.text('Ajouter une photo (optionnelle)'), findsOneWidget);
-    await tester.tap(find.text('Ajouter une photo (optionnelle)'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Choisir dans la galerie'));
+    // Pas de photo : la zone en pointillés propose d'en prendre une.
+    await tester.ensureVisible(find.text('Appuyer pour prendre une photo'));
+    expect(find.text('Appuyer pour prendre une photo'), findsOneWidget);
+    await tester.tap(find.text('Appuyer pour prendre une photo'));
     await tester.pumpAndSettle();
 
     // La photo est demandée en paysage (2 pour 1), et un aperçu apparaît.
     expect(photos.formes, [FormePhoto.paysage]);
-    expect(find.text('Ajouter une photo (optionnelle)'), findsNothing);
-    expect(find.text('Changer la photo'), findsOneWidget);
+    expect(find.text('Appuyer pour prendre une photo'), findsNothing);
+    expect(find.byIcon(Icons.close), findsOneWidget);
 
     // On peut la retirer, puis en remettre une.
     await tester.tap(find.byIcon(Icons.close));
     await tester.pumpAndSettle();
-    expect(find.text('Ajouter une photo (optionnelle)'), findsOneWidget);
-    await tester.tap(find.text('Ajouter une photo (optionnelle)'));
+    expect(find.text('Appuyer pour prendre une photo'), findsOneWidget);
+    await tester.tap(find.text('Appuyer pour prendre une photo'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Prendre une photo'));
-    await tester.pumpAndSettle();
-    expect(find.text('Changer la photo'), findsOneWidget);
+    expect(find.byIcon(Icons.close), findsOneWidget);
 
     // La photo part avec l'alerte.
-    await tester.enterText(find.byType(TextField).first, 'Regardez la photo');
-    // Avec l'aperçu, le bouton est plus bas : on fait défiler jusqu'à lui.
+    await tester.enterText(find.byType(TextField).at(0), 'Une photo');
+    await tester.enterText(find.byType(TextField).at(1), 'Regardez la photo');
     await tester.ensureVisible(find.text("Publier l'alerte"));
     await tester.pumpAndSettle();
     await tester.tap(find.text("Publier l'alerte"));
@@ -1196,7 +1300,13 @@ void main() {
         '0102030405': const Contact(id: 'moi', nom: 'Ange Fresnel'),
       },
     );
-    await allerALInscription(tester, FausseAuth(), messagerie: messagerie);
+    final carnet = FausseCarnet();
+    await allerALInscription(
+      tester,
+      FausseAuth(),
+      messagerie: messagerie,
+      carnet: carnet,
+    );
     await sInscrire(tester);
 
     // La messagerie est vide, avec un message qui dit quoi faire.
@@ -1212,84 +1322,494 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Nouvelle conversation'), findsOneWidget);
     expect(
-      find.textContaining("Vous n'avez pas encore de contact."),
+      find.textContaining("Aucun de vos contacts n'est encore sur StarPole."),
       findsOneWidget,
     );
 
-    // Ajouter un contact : champ vide, il vibre sans message.
-    await tester.tap(find.text('Ajouter un contact'));
+    // Ajouter un contact : prénom et numéro vides, ils vibrent sans message.
+    await tester.tap(find.byIcon(Icons.person_add_alt_1));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Rechercher'));
+    expect(find.text('Ajouter un contact'), findsOneWidget);
+    await tester.tap(find.text('Enregistrer'));
     await tester.pump();
-    expect(
-      tester.state<ChampTexteState>(find.byType(ChampTexte)).enErreur,
-      isTrue,
-    );
+    ChampTexteState champ(int i) =>
+        tester.state<ChampTexteState>(find.byType(ChampTexte).at(i));
+    expect(champ(0).enErreur, isTrue); // prénom
+    expect(champ(1).enErreur, isFalse); // nom : facultatif
+    expect(champ(2).enErreur, isTrue); // numéro
     expect(find.byType(SnackBar), findsNothing);
     await tester.pumpAndSettle();
 
     // Un numéro trop court.
-    await tester.enterText(find.byType(TextField), '0707');
-    await tester.tap(find.text('Rechercher'));
+    final saisies = find.byType(TextField);
+    await tester.enterText(saisies.at(0), 'Inconnu');
+    await tester.enterText(saisies.at(2), '0707');
+    await tester.tap(find.text('Enregistrer'));
+    await tester.pump();
+    expect(champ(2).enErreur, isTrue);
+    expect(champ(0).enErreur, isFalse);
     await tester.pumpAndSettle();
-    expect(find.text('Numéro de téléphone trop court.'), findsOneWidget);
 
-    // Un numéro que personne n'a.
-    await tester.enterText(find.byType(TextField), '0100000000');
-    await tester.tap(find.text('Rechercher'));
+    // Un numéro que personne n'a : on propose d'inviter.
+    await tester.enterText(saisies.at(2), '0100000000');
+    await tester.tap(find.text('Enregistrer'));
     await tester.pumpAndSettle();
     expect(find.textContaining("pas encore sur StarPole"), findsOneWidget);
     expect(find.text('Inviter sur StarPole'), findsOneWidget);
+    expect(carnet.enregistres, isEmpty); // le bouton était éteint
 
     // Mon propre numéro.
-    await tester.enterText(find.byType(TextField), '01 02 03 04 05');
-    await tester.tap(find.text('Rechercher'));
+    await tester.enterText(saisies.at(2), '01 02 03 04 05');
+    await tester.tap(find.text('Enregistrer'));
     await tester.pumpAndSettle();
     expect(find.text("C'est votre propre compte."), findsOneWidget);
 
-    // Le numéro de quelqu'un, écrit avec l'indicatif et des espaces.
-    await tester.enterText(find.byType(TextField), '+225 07 07 07 07 07');
-    await tester.tap(find.text('Rechercher'));
+    // Le numéro de quelqu'un, avec l'indicatif, et « synchroniser » allumé :
+    // le contact va dans le téléphone et dans mes contacts StarPole.
+    await tester.enterText(saisies.at(0), 'Papa');
+    await tester.enterText(saisies.at(1), 'Kouassi');
+    await tester.enterText(saisies.at(2), '+225 07 07 07 07 07');
+    await tester.tap(find.byType(Switch));
     await tester.pumpAndSettle();
-    expect(find.text('Oncle Kouassi'), findsOneWidget);
-    expect(find.text('Ajouter'), findsOneWidget);
-
-    // Je l'ajoute : retour à la liste, où il apparaît.
-    await tester.tap(find.text('Ajouter'));
+    await tester.ensureVisible(find.text('Enregistrer'));
+    await tester.tap(find.text('Enregistrer'));
     await tester.pumpAndSettle();
-    expect(messagerie.actions, ['ajouter:kouassi']);
+    expect(carnet.enregistres, ['Papa|Kouassi|+225 07 07 07 07 07']);
+    expect(messagerie.actions.where((a) => a.startsWith('ajouter:')), [
+      'ajouter:kouassi',
+    ]);
     expect(
-      find.text('Oncle Kouassi a été ajouté à vos contacts.'),
+      find.text('Papa Kouassi a été ajouté à vos contacts.'),
       findsOneWidget,
     );
-    expect(find.text('Oncle Kouassi'), findsOneWidget);
+    // Retour à la liste, où il apparaît sous le nom tapé.
     expect(find.text('Nouvelle conversation'), findsOneWidget);
+    expect(find.text('Papa Kouassi'), findsOneWidget);
   });
 
-  testWidgets('Contacts : retrouver quelqu\'un par e-mail, déjà ajouté', (
+  testWidgets('Contacts : enregistrement dans le téléphone refusé', (
     tester,
   ) async {
-    final messagerie = FausseMessagerie(
-      comptes: {'Kouassi@Exemple.ci': kouassi},
-      contacts: [kouassi],
+    final messagerie = FausseMessagerie(comptes: {'0707070707': kouassi});
+    final carnet = FausseCarnet()..etatEnregistrement = EtatCarnet.refuse;
+    await allerALInscription(
+      tester,
+      FausseAuth(),
+      messagerie: messagerie,
+      carnet: carnet,
     );
-    await allerALInscription(tester, FausseAuth(), messagerie: messagerie);
     await sInscrire(tester);
-
     await tester.tap(find.text('Message'));
     await tester.pumpAndSettle();
     await tester.tap(find.byIcon(Icons.forum));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Ajouter un contact'));
+    await tester.tap(find.byIcon(Icons.person_add_alt_1));
     await tester.pumpAndSettle();
 
-    // Majuscules et espaces ne gênent pas.
-    await tester.enterText(find.byType(TextField), '  KOUASSI@exemple.CI ');
-    await tester.tap(find.text('Rechercher'));
+    await tester.enterText(find.byType(TextField).at(0), 'Papa');
+    await tester.enterText(find.byType(TextField).at(2), '0707070707');
+    await tester.tap(find.byType(Switch));
     await tester.pumpAndSettle();
-    expect(find.text('Oncle Kouassi'), findsOneWidget);
-    expect(find.text('Déjà dans vos contacts'), findsOneWidget);
-    expect(find.text('Ajouter'), findsNothing);
+    await tester.ensureVisible(find.text('Enregistrer'));
+    await tester.tap(find.text('Enregistrer'));
+    await tester.pumpAndSettle();
+
+    // Le contact StarPole est ajouté, mais le téléphone n'a rien reçu.
+    expect(carnet.enregistres, isEmpty);
+    expect(messagerie.actions, contains('ajouter:kouassi'));
+    expect(find.textContaining("n'a pas été enregistré"), findsOneWidget);
+  });
+
+  testWidgets('Conversation : envoyer ma localisation et une photo', (
+    tester,
+  ) async {
+    final messagerie = FausseMessagerie(contacts: [kouassi]);
+    final photos = FausseSelectionPhoto();
+    await allerALInscription(
+      tester,
+      FausseAuth(),
+      messagerie: messagerie,
+      photos: photos,
+    );
+    await sInscrire(tester);
+    await tester.tap(find.text('Message'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.forum));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Oncle Kouassi'));
+    await tester.pumpAndSettle();
+
+    // « Localisation » envoie ma vraie position, avec le nom du lieu.
+    await tester.tap(find.text('Localisation'));
+    await tester.pumpAndSettle();
+    expect(
+      messagerie.actions,
+      contains('message:c_kouassi:Ma localisation : Abidjan, Plateau'),
+    );
+    expect(messagerie.actions, contains('position:c_kouassi:5.3197'));
+    expect(find.text('Ma localisation : Abidjan, Plateau'), findsOneWidget);
+
+    // « Photo » propose la caméra ou la galerie, puis envoie la photo.
+    await tester.tap(find.text('Photo'));
+    await tester.pumpAndSettle();
+    expect(photos.formes, [FormePhoto.paysage]);
+    expect(messagerie.actions, contains('photo:c_kouassi'));
+  });
+
+  testWidgets('Détails : « Partager » ouvre le partage avec le texte', (
+    tester,
+  ) async {
+    final partages = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      const MethodChannel('dev.fluttercommunity.plus/share'),
+      (appel) async {
+        partages.add(appel.arguments.toString());
+        return 'dev.fluttercommunity.plus/share/unavailable';
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('dev.fluttercommunity.plus/share'),
+        null,
+      ),
+    );
+    await allerALInscription(tester, FausseAuth());
+    await sInscrire(tester);
+
+    await tester.tap(find.text('Personne en detresse'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Partager'));
+    await tester.tap(find.text('Partager'));
+    await tester.pumpAndSettle();
+
+    expect(partages, hasLength(1));
+    expect(partages.single, contains('Alerte StarPole : Personne en detresse'));
+    expect(partages.single, contains('Une personne agee est perdue'));
+    expect(partages.single, contains('Treichville'));
+  });
+
+  testWidgets('Carte : toucher un repère choisit l\'alerte', (tester) async {
+    final alertes = [
+      Alerte(
+        id: 'u1',
+        type: TypeAlerte.urgence,
+        categorie: 'Accident grave',
+        description: 'Une voiture a percute un mur.',
+        ville: 'Abidjan',
+        latitude: 5.32,
+        longitude: -4.01,
+        auteurId: 'kouadio',
+        auteurNom: 'Kouadio Eliezer',
+        creeLe: DateTime.now().subtract(const Duration(minutes: 5)),
+      ),
+      Alerte(
+        id: 's1',
+        type: TypeAlerte.service,
+        categorie: 'Objet perdu',
+        description: 'Un sac noir.',
+        ville: 'Abidjan',
+        latitude: 5.33,
+        longitude: -4.02,
+        auteurId: 'mariam',
+        auteurNom: 'Mariam',
+        creeLe: DateTime.now().subtract(const Duration(minutes: 9)),
+      ),
+      // Sans position : elle n'a pas de repère sur la carte.
+      Alerte(
+        id: 'x1',
+        type: TypeAlerte.don,
+        categorie: 'Don sans lieu',
+        description: 'Pas de position.',
+        ville: 'Abidjan',
+        auteurId: 'yves',
+        auteurNom: 'Yves',
+        creeLe: DateTime.now(),
+      ),
+    ];
+    await allerALInscription(
+      tester,
+      FausseAuth(),
+      alertes: FausseAlertes(initiales: alertes),
+    );
+    await sInscrire(tester);
+    await tester.tap(find.byIcon(Icons.map_outlined));
+    await tester.pumpAndSettle();
+
+    // Un repère par alerte qui a une position, et la fiche de la première.
+    expect(find.byKey(const ValueKey('repere_u1')), findsOneWidget);
+    expect(find.byKey(const ValueKey('repere_s1')), findsOneWidget);
+    expect(find.byKey(const ValueKey('repere_x1')), findsNothing);
+    expect(find.text('Accident grave'), findsOneWidget);
+
+    // Toucher l'autre repère change la fiche.
+    await tester.tap(find.byKey(const ValueKey('repere_s1')));
+    await tester.pumpAndSettle();
+    expect(find.text('Objet perdu'), findsOneWidget);
+    expect(find.text('Accident grave'), findsNothing);
+  });
+
+  test('Carte : ce qui est envoyé à la page 3D', () {
+    final donnees = DonneesCarte(
+      alertes: [
+        Alerte(
+          id: 'u1',
+          type: TypeAlerte.urgence,
+          categorie: 'Accident',
+          description: 'x',
+          ville: 'Abidjan',
+          latitude: 5.32,
+          longitude: -4.01,
+          auteurId: 'a',
+          auteurNom: 'A',
+          creeLe: DateTime(2026),
+        ),
+        Alerte(
+          id: 'd1',
+          type: TypeAlerte.don,
+          categorie: 'Riz',
+          description: 'x',
+          ville: 'Abidjan',
+          latitude: 5.33,
+          longitude: -4.02,
+          auteurId: 'b',
+          auteurNom: 'B',
+          creeLe: DateTime(2026),
+        ),
+        // Sans position : n'est pas envoyée.
+        Alerte(
+          id: 'z',
+          type: TypeAlerte.service,
+          categorie: 'Sans lieu',
+          description: 'x',
+          ville: 'Abidjan',
+          auteurId: 'c',
+          auteurNom: 'C',
+          creeLe: DateTime(2026),
+        ),
+      ],
+      choisieId: 'd1',
+      auChoix: (_) {},
+      hautEntete: 100,
+      basFiche: 235,
+      latitude: 5.3197,
+      longitude: -4.0167,
+    );
+
+    final json = donnees.versJson();
+    expect(json['haut'], 100);
+    expect(json['bas'], 235);
+    expect(json['moi'], {'lat': 5.3197, 'lng': -4.0167});
+    final liste = json['alertes'] as List;
+    expect(liste, hasLength(2));
+    expect(liste[0]['id'], 'u1');
+    expect(liste[0]['urgence'], isTrue);
+    expect(liste[0]['choisie'], isFalse);
+    expect(liste[1]['id'], 'd1');
+    expect(liste[1]['choisie'], isTrue);
+    expect(liste[1]['urgence'], isFalse);
+    // Les couleurs sont au format « #RRGGBB ».
+    expect(liste[0]['couleur'], matches(RegExp(r'^#[0-9a-f]{6}$')));
+    expect(liste[0]['couleur'], isNot(liste[1]['couleur']));
+    // Sans position, « moi » est vide.
+    final sans = DonneesCarte(
+      alertes: const [],
+      choisieId: null,
+      auChoix: (_) {},
+      hautEntete: 0,
+      basFiche: 0,
+    );
+    expect(sans.versJson()['moi'], isNull);
+  });
+
+  testWidgets('Carte : le filtre ne garde que le type choisi', (tester) async {
+    final avecPosition = [
+      Alerte(
+        id: 'u1',
+        type: TypeAlerte.urgence,
+        categorie: 'Accident grave',
+        description: 'Une voiture a percute un mur.',
+        ville: 'Abidjan',
+        latitude: 5.32,
+        longitude: -4.01,
+        auteurId: 'kouadio',
+        auteurNom: 'Kouadio Eliezer',
+        creeLe: DateTime.now().subtract(const Duration(minutes: 5)),
+      ),
+      Alerte(
+        id: 'd1',
+        type: TypeAlerte.don,
+        categorie: 'Don de riz',
+        description: 'Un sac de riz a donner.',
+        ville: 'Abidjan',
+        latitude: 5.33,
+        longitude: -4.02,
+        auteurId: 'mariam',
+        auteurNom: 'Mariam',
+        creeLe: DateTime.now().subtract(const Duration(minutes: 9)),
+      ),
+    ];
+    await allerALInscription(
+      tester,
+      FausseAuth(),
+      alertes: FausseAlertes(initiales: avecPosition),
+    );
+    await sInscrire(tester);
+    await tester.tap(find.byIcon(Icons.map_outlined));
+    await tester.pumpAndSettle();
+
+    // Sans filtre, la fiche montre l'alerte la plus récente.
+    expect(find.text('Accident grave'), findsOneWidget);
+
+    // Je ne garde que les dons.
+    await tester.tap(find.byIcon(Icons.filter_alt_outlined));
+    await tester.pumpAndSettle();
+    expect(find.text('Filtrer les alertes'), findsOneWidget);
+    await tester.tap(find.text('Dons'));
+    await tester.pumpAndSettle();
+    expect(find.text('Don de riz'), findsOneWidget);
+    expect(find.text('Accident grave'), findsNothing);
+
+    // Un type sans alerte : la fiche le dit. Puis je reprends tout.
+    await tester.tap(find.byIcon(Icons.filter_alt_outlined));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Services'));
+    await tester.pumpAndSettle();
+    expect(find.text('Don de riz'), findsNothing);
+    expect(
+      find.text("Aucune alerte avec une position pour l'instant."),
+      findsOneWidget,
+    );
+    await tester.tap(find.byIcon(Icons.filter_alt_outlined));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Toutes les alertes'));
+    await tester.pumpAndSettle();
+    expect(find.text('Accident grave'), findsOneWidget);
+  });
+
+  testWidgets('Profil : le rouage ouvre les Paramètres, pas la modification', (
+    tester,
+  ) async {
+    final auth = FausseAuth();
+    await allerALInscription(tester, auth);
+    await sInscrire(tester);
+    await tester.tap(find.text('Profil'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.settings));
+    await tester.pumpAndSettle();
+    expect(find.text('Paramètres'), findsOneWidget);
+    expect(find.text('Modification'), findsNothing);
+
+    // Les textes légaux s'ouvrent.
+    await tester.tap(find.text('Politique de confidentialité'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('1. Qui est responsable'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.chevron_left));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text("Conditions d'utilisation"));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('1. À quoi sert StarPole'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.chevron_left));
+    await tester.pumpAndSettle();
+
+    // Se déconnecter : confirmation, puis retour à la connexion.
+    await tester.ensureVisible(find.text('Se déconnecter'));
+    await tester.tap(find.text('Se déconnecter'));
+    await tester.pumpAndSettle();
+    expect(find.text('Se déconnecter ?'), findsOneWidget);
+    await tester.tap(find.text('Annuler'));
+    await tester.pumpAndSettle();
+    expect(auth.appels, isNot(contains('deconnecter')));
+    await tester.tap(find.text('Se déconnecter'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Se déconnecter').last);
+    await tester.pumpAndSettle();
+    expect(auth.appels, contains('deconnecter'));
+    expect(find.text('Connexion'), findsOneWidget);
+  });
+
+  testWidgets("Inscription : les conditions et la confidentialité s'ouvrent", (
+    tester,
+  ) async {
+    await allerALInscription(tester, FausseAuth());
+
+    Future<void> toucherLien(String texte) async {
+      final finder = find.byWidgetPredicate(
+        (w) => w is RichText && w.text.toPlainText().contains("J'accepte les"),
+      );
+      final riche = tester.widget<RichText>(finder);
+      TapGestureRecognizer? lien;
+      riche.text.visitChildren((span) {
+        if (span is TextSpan && span.text == texte) {
+          lien = span.recognizer as TapGestureRecognizer?;
+        }
+        return true;
+      });
+      expect(lien, isNotNull, reason: 'le lien « $texte » doit être cliquable');
+      lien!.onTap!();
+      await tester.pumpAndSettle();
+    }
+
+    await toucherLien("conditions d'utilisation");
+    expect(find.textContaining('1. À quoi sert StarPole'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.chevron_left));
+    await tester.pumpAndSettle();
+
+    await toucherLien('politique de confidentialité');
+    expect(find.textContaining('1. Qui est responsable'), findsOneWidget);
+  });
+
+  testWidgets('Profil : seul le crayon ouvre la page Modification', (
+    tester,
+  ) async {
+    await allerALInscription(tester, FausseAuth());
+    await sInscrire(tester);
+    await tester.tap(find.text('Profil'));
+    await tester.pumpAndSettle();
+
+    // Un appui sur la photo de profil elle-même ne fait rien.
+    await tester.tap(find.byType(ClipOval).first);
+    await tester.pumpAndSettle();
+    expect(find.text('Modification'), findsNothing);
+    expect(find.text('Mon profil'), findsOneWidget);
+
+    // Le crayon ouvre la page.
+    await tester.tap(find.byIcon(Icons.edit));
+    await tester.pumpAndSettle();
+    expect(find.text('Modification'), findsOneWidget);
+  });
+
+  testWidgets('Modification : une seule opération suffit pour valider', (
+    tester,
+  ) async {
+    final auth = FausseAuth();
+    final photos = FausseSelectionPhoto();
+    await allerALInscription(tester, auth, photos: photos);
+    await sInscrire(tester);
+    await tester.tap(find.text('Profil'));
+    await tester.pumpAndSettle();
+
+    // Seul le nom est rempli : le numéro peut rester vide.
+    await tester.tap(find.byIcon(Icons.edit));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).at(1), 'Autre Nom');
+    await tester.tap(find.text('Valider'));
+    await tester.pumpAndSettle();
+    expect(auth.appels, contains('modifier:Autre Nom:null'));
+    expect(find.text('Modification'), findsNothing);
+    expect(find.text('Profil mis à jour.'), findsOneWidget);
+
+    // La photo est changée : « Valider » sans rien écrire ferme la page, sans
+    // faire vibrer les champs.
+    await tester.tap(find.byIcon(Icons.edit));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.edit));
+    await tester.pumpAndSettle();
+    expect(auth.photosEnvoyees, hasLength(1));
+    await tester.tap(find.text('Valider'));
+    await tester.pumpAndSettle();
+    expect(find.text('Modification'), findsNothing);
+    expect(find.text('Mon profil'), findsOneWidget);
   });
 
   testWidgets('Profil : page Modification (nom et numéro)', (tester) async {
@@ -1299,8 +1819,8 @@ void main() {
     await tester.tap(find.text('Profil'));
     await tester.pumpAndSettle();
 
-    // Le rouage ouvre la page ; les champs blancs montrent les valeurs actuelles.
-    await tester.tap(find.byIcon(Icons.settings));
+    // Le crayon ouvre la page ; les champs blancs montrent les valeurs actuelles.
+    await tester.tap(find.byIcon(Icons.edit));
     await tester.pumpAndSettle();
     expect(find.text('Modification'), findsOneWidget);
     expect(find.text('Ange Fresnel'), findsOneWidget);
@@ -1517,16 +2037,25 @@ void main() {
     EntreeCarnet(nom: 'Le plombier', numeros: ['0808080808']),
   ]);
 
-  testWidgets('Carnet : retrouver ses proches inscrits et les ajouter', (
+  Future<void> ouvrirNouvelleConversation(WidgetTester tester) async {
+    await tester.tap(find.text('Message'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.forum));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('Contacts : synchronisation automatique avec le téléphone', (
     tester,
   ) async {
     const mariam = Contact(id: 'mariam', nom: 'Mariam Coulibaly');
+    const ancien = Contact(id: 'ancien', nom: 'Ancien Contact');
     final messagerie = FausseMessagerie(
       comptes: {
         '0707070707': kouassi,
         '0101010101': mariam, // son 2e numéro dans le carnet
         '0505050505': mariam, // son 1er numéro : même personne
       },
+      contacts: [ancien], // ajouté à la main avant
     );
     final carnet = FausseCarnet(carnetDeTest());
     await allerALInscription(
@@ -1536,86 +2065,31 @@ void main() {
       carnet: carnet,
     );
     await sInscrire(tester);
+    await ouvrirNouvelleConversation(tester);
 
-    await tester.tap(find.text('Message'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byIcon(Icons.forum));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Depuis mon carnet de contacts'));
-    await tester.pumpAndSettle();
-
-    // L'explication vient avant toute demande d'autorisation.
-    expect(find.text('Retrouvez vos proches sur StarPole'), findsOneWidget);
-    expect(find.textContaining('ne sont pas enregistrés'), findsOneWidget);
-    expect(carnet.lectures, 0);
-
-    // Je continue : le carnet est lu, et seuls les inscrits apparaissent
-    // (une personne avec deux numéros n'est montrée qu'une fois).
-    await tester.tap(find.text('Autoriser et chercher'));
-    await tester.pumpAndSettle();
+    // Le carnet est lu dès l'ouverture, sans bouton à toucher.
     expect(carnet.lectures, 1);
-    expect(find.text('2 de vos contacts sont sur StarPole'), findsOneWidget);
+    expect(find.text('Mes contacts'), findsOneWidget);
+    // Seuls les inscrits apparaissent, une seule fois chacun.
     expect(find.text('Oncle Kouassi'), findsOneWidget);
     expect(find.text('Dans votre carnet : Papa Kouassi'), findsOneWidget);
     expect(find.text('Mariam Coulibaly'), findsOneWidget);
+    expect(find.text('Ancien Contact'), findsOneWidget);
     expect(find.text('Le plombier'), findsNothing);
-    // Les 5 numéros (sans doublon) ont été comparés.
+    expect(find.textContaining('ne les enregistre pas'), findsOneWidget);
+    // Rien n'est enregistré dans la base : pas de « ajouter: ».
+    expect(messagerie.actions.where((a) => a.startsWith('ajouter:')), isEmpty);
+    // Les numéros du carnet (sans doublon) ont été comparés.
     expect(messagerie.actions.first, 'carnet:4');
 
-    // J'en ajoute un, puis tous les autres d'un coup.
-    await tester.tap(find.text('Ajouter').first);
+    // Un appui sur une personne ouvre la conversation.
+    await tester.tap(find.text('Mariam Coulibaly'));
     await tester.pumpAndSettle();
-    expect(find.text('Ajouté'), findsOneWidget);
-    expect(find.textContaining('Tout ajouter'), findsNothing);
-
-    await tester.tap(find.text('Ajouter'));
-    await tester.pumpAndSettle();
-    expect(find.text('Ajouté'), findsNWidgets(2));
-    expect(
-      messagerie.actions.where((a) => a.startsWith('ajouter:')),
-      hasLength(2),
-    );
+    expect(messagerie.actions, contains('ouvrir:mariam'));
+    expect(find.text('Dites bonjour à Mariam Coulibaly.'), findsOneWidget);
   });
 
-  testWidgets('Carnet : « Tout ajouter » ajoute tous les inscrits', (
-    tester,
-  ) async {
-    const mariam = Contact(id: 'mariam', nom: 'Mariam Coulibaly');
-    final messagerie = FausseMessagerie(
-      comptes: {'0707070707': kouassi, '0505050505': mariam},
-    );
-    await allerALInscription(
-      tester,
-      FausseAuth(),
-      messagerie: messagerie,
-      carnet: FausseCarnet(carnetDeTest()),
-    );
-    await sInscrire(tester);
-    await tester.tap(find.text('Message'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byIcon(Icons.forum));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Depuis mon carnet de contacts'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Autoriser et chercher'));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.text('Tout ajouter (2)'));
-    await tester.pumpAndSettle();
-    expect(find.text('Ajouté'), findsNWidgets(2));
-    expect(messagerie.actions.where((a) => a.startsWith('ajouter:')).toSet(), {
-      'ajouter:kouassi',
-      'ajouter:mariam',
-    });
-
-    // De retour sur « Nouvelle conversation », ils sont dans la liste.
-    await tester.tap(find.byIcon(Icons.chevron_left));
-    await tester.pumpAndSettle();
-    expect(find.text('Oncle Kouassi'), findsOneWidget);
-    expect(find.text('Mariam Coulibaly'), findsOneWidget);
-  });
-
-  testWidgets('Carnet : accès refusé puis accordé', (tester) async {
+  testWidgets('Contacts : accès refusé puis accordé', (tester) async {
     final messagerie = FausseMessagerie(comptes: {'0707070707': kouassi});
     final carnet = FausseCarnet(const ResultatCarnet(EtatCarnet.refuse));
     await allerALInscription(
@@ -1625,66 +2099,64 @@ void main() {
       carnet: carnet,
     );
     await sInscrire(tester);
-    await tester.tap(find.text('Message'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byIcon(Icons.forum));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Depuis mon carnet de contacts'));
-    await tester.pumpAndSettle();
+    await ouvrirNouvelleConversation(tester);
 
-    await tester.tap(find.text('Autoriser et chercher'));
-    await tester.pumpAndSettle();
-    expect(find.text('Accès refusé'), findsOneWidget);
+    expect(carnet.lectures, 1);
+    expect(find.textContaining("Sans l'accès à vos contacts"), findsOneWidget);
     expect(messagerie.actions, isEmpty); // rien n'a été envoyé
 
-    // L'utilisateur change d'avis et réessaie.
+    // L'utilisateur change d'avis et autorise.
     carnet.resultat = carnetDeTest();
-    await tester.tap(find.text('Réessayer'));
+    await tester.tap(find.text('Autoriser'));
     await tester.pumpAndSettle();
-    expect(find.text('1 de vos contacts est sur StarPole'), findsOneWidget);
+    expect(carnet.lectures, 2);
     expect(find.text('Oncle Kouassi'), findsOneWidget);
+    expect(find.textContaining("Sans l'accès"), findsNothing);
   });
 
-  testWidgets('Carnet : accès bloqué, ouverture des réglages', (tester) async {
+  testWidgets('Contacts : accès bloqué, ouverture des réglages', (
+    tester,
+  ) async {
     final carnet = FausseCarnet(const ResultatCarnet(EtatCarnet.bloque));
     await allerALInscription(tester, FausseAuth(), carnet: carnet);
     await sInscrire(tester);
-    await tester.tap(find.text('Message'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byIcon(Icons.forum));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Depuis mon carnet de contacts'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Autoriser et chercher'));
-    await tester.pumpAndSettle();
+    await ouvrirNouvelleConversation(tester);
 
-    expect(find.text('Accès bloqué'), findsOneWidget);
+    expect(find.textContaining('bloqué'), findsOneWidget);
     await tester.tap(find.text('Ouvrir les réglages'));
     await tester.pumpAndSettle();
     expect(carnet.reglagesOuverts, 1);
   });
 
-  testWidgets("Carnet : personne n'est encore sur StarPole", (tester) async {
+  testWidgets("Contacts : personne n'est encore sur StarPole", (tester) async {
     await allerALInscription(
       tester,
       FausseAuth(),
       carnet: FausseCarnet(carnetDeTest()),
     );
     await sInscrire(tester);
-    await tester.tap(find.text('Message'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byIcon(Icons.forum));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Depuis mon carnet de contacts'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Autoriser et chercher'));
-    await tester.pumpAndSettle();
+    await ouvrirNouvelleConversation(tester);
 
     expect(
       find.textContaining("Aucun de vos contacts n'est encore sur StarPole."),
       findsOneWidget,
     );
   });
+}
+
+/// Fausse carte : un bouton par alerte qui a une position, pour pouvoir
+/// « toucher un repère » sans afficher la vraie carte 3D.
+Widget carteDeTest(BuildContext context, DonneesCarte donnees) {
+  return Column(
+    children: [
+      for (final a in donnees.alertes)
+        TextButton(
+          key: ValueKey('repere_${a.id}'),
+          onPressed: () => donnees.auChoix(a.id),
+          child: Text('repere ${a.categorie}'),
+        ),
+    ],
+  );
 }
 
 /// Faux service d'appel : il note ce qui est demandé et laisse le test

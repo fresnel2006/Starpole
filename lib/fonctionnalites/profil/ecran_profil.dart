@@ -5,9 +5,11 @@ import '../../application/couleurs.dart';
 import '../../noyau/alerte.dart';
 import '../../noyau/service_alertes.dart';
 import '../../noyau/service_auth.dart';
+import '../../partage/composants/ligne_menu.dart';
 import '../../partage/composants/photo_profil.dart';
 import '../../partage/styles.dart';
 import 'ecran_mes_alertes.dart';
+import '../parametres/ecran_parametres.dart';
 import 'ecran_modification.dart';
 
 /// Onglet Profil : photo, nom, statistiques et menu.
@@ -41,7 +43,13 @@ class _EcranProfilState extends State<EcranProfil> {
     });
   }
 
-  /// Ouvre la page de modification du profil.
+  /// Ouvre la page « Paramètres » (le rouage).
+  void _ouvrirParametres() {
+    Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => const EcranParametres()));
+  }
+
+  /// Ouvre la page de modification du profil (le crayon).
   Future<void> _modifierProfil() async {
     final modifie = await Navigator.of(context).push<bool>(
       MaterialPageRoute<bool>(builder: (_) => const EcranModification()),
@@ -63,9 +71,9 @@ class _EcranProfilState extends State<EcranProfil> {
               children: [
                 Semantics(
                   button: true,
-                  label: 'Modifier mon profil',
+                  label: 'Paramètres',
                   child: GestureDetector(
-                    onTap: _modifierProfil,
+                    onTap: _ouvrirParametres,
                     child: const Icon(
                       Icons.settings,
                       size: 36,
@@ -91,6 +99,8 @@ class _EcranProfilState extends State<EcranProfil> {
               builder: (context, instantane) => PhotoProfilModifiable(
                 profil: instantane.data,
                 auChangement: _recharger,
+                // Le crayon ouvre la page de modification du profil.
+                auAppui: _modifierProfil,
               ),
             ),
             const SizedBox(height: 22),
@@ -164,7 +174,7 @@ class _EcranProfilState extends State<EcranProfil> {
             ),
             const SizedBox(height: 20),
             Container(height: 1, color: Couleurs.grisBordure),
-            _LigneMenu(
+            LigneMenu(
               icone: Icons.edit_note,
               texte: 'Mes alertes, aides & dons',
               auAppui: () => Navigator.of(context).push(
@@ -173,8 +183,8 @@ class _EcranProfilState extends State<EcranProfil> {
                 ),
               ),
             ),
-            const _LigneMenu(icone: Icons.help, texte: 'Aides & support'),
-            const _LigneMenu(icone: Icons.help, texte: 'A propos'),
+            const LigneMenu(icone: Icons.help, texte: 'Aides & support'),
+            const LigneMenu(icone: Icons.help, texte: 'A propos'),
           ],
         ),
       ),
@@ -239,43 +249,6 @@ class _Statistique extends StatelessWidget {
           style: Styles.gras(11.5, Colors.black, hauteur: 1.35),
         ),
       ],
-    );
-  }
-}
-
-class _LigneMenu extends StatelessWidget {
-  const _LigneMenu({required this.icone, required this.texte, this.auAppui});
-
-  final IconData icone;
-  final String texte;
-  final VoidCallback? auAppui;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: auAppui,
-      child: Column(
-        children: [
-          SizedBox(
-            height: 56,
-            child: Row(
-              children: [
-                Icon(icone, size: 30, color: Colors.black),
-                const SizedBox(width: 18),
-                Expanded(
-                  child: Text(
-                    texte,
-                    style: Styles.gras(13.5, Couleurs.grisTexte),
-                  ),
-                ),
-                const Icon(Icons.chevron_right, size: 28, color: Colors.black),
-              ],
-            ),
-          ),
-          Container(height: 1, color: Couleurs.grisBordure),
-        ],
-      ),
     );
   }
 }

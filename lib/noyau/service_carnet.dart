@@ -41,6 +41,14 @@ abstract class ServiceCarnet {
 
   /// Ouvre les réglages de l'appli (pour autoriser l'accès aux contacts).
   Future<void> ouvrirReglages();
+
+  /// Ajoute une personne au carnet de contacts du téléphone (après avoir
+  /// demandé l'autorisation d'écrire dans les contacts).
+  Future<EtatCarnet> enregistrer({
+    required String prenom,
+    String nom = '',
+    required String numero,
+  });
 }
 
 /// Version réelle, basée sur le paquet `flutter_contacts`.
@@ -88,4 +96,37 @@ class ServiceCarnetReel implements ServiceCarnet {
   @override
   Future<void> ouvrirReglages() =>
       carnet.FlutterContacts.permissions.openSettings();
+
+  @override
+  Future<EtatCarnet> enregistrer({
+    required String prenom,
+    String nom = '',
+    required String numero,
+  }) async {
+    try {
+      final statut = await carnet.FlutterContacts.permissions.request(
+        carnet.PermissionType.readWrite,
+      );
+      switch (statut) {
+        case carnet.PermissionStatus.granted:
+        case carnet.PermissionStatus.limited:
+          break;
+        case carnet.PermissionStatus.permanentlyDenied:
+        case carnet.PermissionStatus.restricted:
+          return EtatCarnet.bloque;
+        case carnet.PermissionStatus.denied:
+        case carnet.PermissionStatus.notDetermined:
+          return EtatCarnet.refuse;
+      }
+      await carnet.FlutterContacts.create(
+        carnet.Contact(
+          name: carnet.Name(first: prenom, last: nom.isEmpty ? null : nom),
+          phones: [carnet.Phone(number: numero)],
+        ),
+      );
+      return EtatCarnet.ok;
+    } on PlatformException {
+      return EtatCarnet.refuse;
+    }
+  }
 }

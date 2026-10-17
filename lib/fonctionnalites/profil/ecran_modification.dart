@@ -75,6 +75,13 @@ class _EcranModificationState extends State<EcranModification> {
     final nom = _nouveauNom.text.trim();
     final telephone = _nouveauTelephone.text.trim();
     if (nom.isEmpty && telephone.isEmpty) {
+      // La photo vient d'être changée : il n'y a rien d'autre à enregistrer,
+      // on peut simplement sortir.
+      if (_modifie) {
+        Navigator.of(context).pop(true);
+        return;
+      }
+      // Rien n'a été fait : les deux champs vibrent.
       _cleNom.currentState?.signalerErreur();
       _cleTelephone.currentState?.signalerErreur();
       return;
