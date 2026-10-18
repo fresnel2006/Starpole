@@ -40,6 +40,9 @@ class FausseAuth implements ServiceAuth {
   /// Le seul code accepté par la vérification.
   final String codeValide;
 
+  /// Le numéro du profil (vide : la messagerie propose d'en ajouter un).
+  String telephone = '0700000000';
+
   final List<String> appels = [];
 
   /// Ce que renvoie la connexion Google (false = fenêtre fermée).
@@ -96,11 +99,12 @@ class FausseAuth implements ServiceAuth {
   Future<void> modifierProfil({String? nom, String? telephone}) async {
     appels.add('modifier:$nom:$telephone');
     if (erreur != null) throw ErreurAuth(erreur!);
+    if (telephone != null) this.telephone = telephone;
   }
 
   @override
   Future<ProfilUtilisateur?> chargerProfil() async =>
-      const ProfilUtilisateur(nom: 'Ange Fresnel', telephone: '0700000000');
+      ProfilUtilisateur(nom: 'Ange Fresnel', telephone: telephone);
 }
 
 /// Fausses alertes en mémoire : elles se comportent comme Firestore (les
@@ -695,11 +699,14 @@ void main() {
     expect(auth.appels, isEmpty);
     await tester.pumpAndSettle();
 
-    // Un numéro de téléphone : le champ vibre et un message explique.
+    // Un numéro de téléphone n'est pas une adresse : le champ vibre.
     await tester.enterText(find.byType(TextField).at(1), '07 07 07 07 07');
     await tester.tap(find.text("S'inscrire").last);
     await tester.pump();
-    expect(find.text(messageNumeroBientot), findsOneWidget);
+    expect(
+      tester.state<ChampTexteState>(find.byType(ChampTexte).at(1)).enErreur,
+      isTrue,
+    );
     expect(auth.appels, isEmpty);
     await tester.pumpAndSettle();
     await tester.tap(find.byType(CaseACocher)); // on décoche
@@ -781,13 +788,17 @@ void main() {
     expect(auth.appels, isEmpty);
     await tester.pumpAndSettle();
 
-    // Un numéro de téléphone n'est pas encore accepté.
+    // Un numéro de téléphone n'est pas une adresse : le champ vibre.
     final champs = find.byType(TextField);
     await tester.enterText(champs.at(0), '07 07 07 07 07');
     await tester.tap(find.text('Se connecter').last);
-    await tester.pumpAndSettle();
-    expect(find.text(messageNumeroBientot), findsOneWidget);
+    await tester.pump();
+    expect(
+      tester.state<ChampTexteState>(find.byType(ChampTexte).at(0)).enErreur,
+      isTrue,
+    );
     expect(auth.appels, isEmpty);
+    await tester.pumpAndSettle();
 
     // Une erreur du serveur s'affiche et on reste sur la connexion.
     await tester.enterText(champs.at(0), 'fresnel@exemple.ci');
@@ -1765,25 +1776,32 @@ void main() {
     expect(find.textContaining('1. Qui est responsable'), findsOneWidget);
   });
 
-  testWidgets('Profil : seul le crayon ouvre la page Modification', (
-    tester,
-  ) async {
-    await allerALInscription(tester, FausseAuth());
-    await sInscrire(tester);
-    await tester.tap(find.text('Profil'));
-    await tester.pumpAndSettle();
+  testWidgets(
+    'Profil : la photo change la photo, le crayon ouvre Modification',
+    (tester) async {
+      final auth = FausseAuth();
+      final photos = FausseSelectionPhoto();
+      await allerALInscription(tester, auth, photos: photos);
+      await sInscrire(tester);
+      await tester.tap(find.text('Profil'));
+      await tester.pumpAndSettle();
 
-    // Un appui sur la photo de profil elle-même ne fait rien.
-    await tester.tap(find.byType(ClipOval).first);
-    await tester.pumpAndSettle();
-    expect(find.text('Modification'), findsNothing);
-    expect(find.text('Mon profil'), findsOneWidget);
+      // Un appui sur la photo ouvre le sélecteur de photos et l'enregistre,
+      // sans ouvrir la page de modification.
+      await tester.tap(find.byType(ClipOval).first);
+      await tester.pumpAndSettle();
+      expect(photos.formes, [FormePhoto.carre]);
+      expect(auth.photosEnvoyees, hasLength(1));
+      expect(find.text('Modification'), findsNothing);
+      expect(find.text('Mon profil'), findsOneWidget);
 
-    // Le crayon ouvre la page.
-    await tester.tap(find.byIcon(Icons.edit));
-    await tester.pumpAndSettle();
-    expect(find.text('Modification'), findsOneWidget);
-  });
+      // Le crayon ouvre la page de modification, sans changer la photo.
+      await tester.tap(find.byIcon(Icons.edit));
+      await tester.pumpAndSettle();
+      expect(find.text('Modification'), findsOneWidget);
+      expect(auth.photosEnvoyees, hasLength(1));
+    },
+  );
 
   testWidgets('Modification : une seule opération suffit pour valider', (
     tester,
@@ -1816,6 +1834,61 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Modification'), findsNothing);
     expect(find.text('Mon profil'), findsOneWidget);
+  });
+
+  testWidgets('Messagerie : la bannière demande le numéro tant qu\'il manque', (
+    tester,
+  ) async {
+    final auth = FausseAuth()..telephone = '';
+    await allerALInscription(tester, auth);
+    await sInscrire(tester);
+
+    await tester.tap(find.text('Message'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text(
+        'Entrez votre numéro de téléphone pour être visible par vos contacts.',
+      ),
+      findsOneWidget,
+    );
+
+    // Un numéro vide ou trop court fait vibrer le champ, rien n'est enregistré.
+    await tester.tap(find.text('Ajouter mon numéro'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Enregistrer'));
+    await tester.pump();
+    expect(
+      tester.state<ChampTexteState>(find.byType(ChampTexte).last).enErreur,
+      isTrue,
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).last, '0707');
+    await tester.tap(find.text('Enregistrer'));
+    await tester.pump();
+    expect(
+      tester.state<ChampTexteState>(find.byType(ChampTexte).last).enErreur,
+      isTrue,
+    );
+    expect(auth.appels.where((a) => a.startsWith('modifier')), isEmpty);
+    await tester.pumpAndSettle();
+
+    // Un vrai numéro : enregistré, la bannière disparaît.
+    await tester.enterText(find.byType(TextField).last, '07 07 07 07 07');
+    await tester.tap(find.text('Enregistrer'));
+    await tester.pumpAndSettle();
+    expect(auth.appels, contains('modifier:null:07 07 07 07 07'));
+    expect(find.text('Ajouter mon numéro'), findsNothing);
+    expect(find.textContaining('Numéro enregistré'), findsOneWidget);
+  });
+
+  testWidgets('Messagerie : pas de bannière quand le numéro est connu', (
+    tester,
+  ) async {
+    await allerALInscription(tester, FausseAuth());
+    await sInscrire(tester);
+    await tester.tap(find.text('Message'));
+    await tester.pumpAndSettle();
+    expect(find.text('Ajouter mon numéro'), findsNothing);
   });
 
   testWidgets('Profil : page Modification (nom et numéro)', (tester) async {

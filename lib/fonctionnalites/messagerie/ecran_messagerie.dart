@@ -3,9 +3,13 @@ import 'package:provider/provider.dart';
 
 import '../../application/couleurs.dart';
 import '../../noyau/messagerie.dart';
+import '../../noyau/normalisation.dart';
+import '../../noyau/service_auth.dart';
 import '../../noyau/service_messagerie.dart';
 import '../../partage/composants/avatar_utilisateur.dart';
+import '../../partage/composants/bouton_rouge.dart';
 import '../../partage/composants/champ_recherche.dart';
+import '../../partage/composants/champ_texte.dart';
 import '../../partage/composants/puce.dart';
 import '../../partage/styles.dart';
 import 'ecran_contacts.dart';
@@ -27,6 +31,48 @@ class _EcranMessagerieState extends State<EcranMessagerie> {
   /// Filtre choisi : vrai pour « Tous », faux pour « Groupes ».
   bool _tousChoisi = true;
   String _recherche = '';
+
+  /// Vrai si mon profil a un numéro de téléphone, faux s'il n'en a pas, null
+  /// tant qu'on ne le sait pas. Sans numéro, mes contacts ne peuvent pas me
+  /// retrouver : une bannière le dit.
+  bool? _aNumero;
+
+  @override
+  void initState() {
+    super.initState();
+    _verifierNumero();
+  }
+
+  Future<void> _verifierNumero() async {
+    final profil = await context.read<ServiceAuth>().chargerProfil();
+    if (!mounted) return;
+    setState(() => _aNumero = (profil?.telephone ?? '').trim().isNotEmpty);
+  }
+
+  /// Ouvre la feuille pour entrer son numéro.
+  Future<void> _ajouterNumero() async {
+    final enregistre = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) => const _FeuilleNumero(),
+    );
+    if (enregistre != true || !mounted) return;
+    setState(() => _aNumero = true);
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Numéro enregistré : vos contacts '
+            'peuvent maintenant vous retrouver.',
+          ),
+        ),
+      );
+  }
 
   void _ouvrir(Conversation conversation) {
     Navigator.of(context).push(
@@ -81,6 +127,10 @@ class _EcranMessagerieState extends State<EcranMessagerie> {
                           ),
                         ],
                       ),
+                      if (_aNumero == false) ...[
+                        const SizedBox(height: 14),
+                        _BanniereNumero(auAppui: _ajouterNumero),
+                      ],
                       const SizedBox(height: 18),
                       ChampRecherche(
                         indication: 'Rechercher une conversation',
@@ -354,6 +404,169 @@ class _LigneConversation extends StatelessWidget {
           ),
           if (!dernier) Container(height: 1, color: Couleurs.grisBordure),
         ],
+      ),
+    );
+  }
+}
+
+/// Bannière : sans numéro de téléphone dans le profil, les contacts ne peuvent
+/// pas retrouver la personne.
+class _BanniereNumero extends StatelessWidget {
+  const _BanniereNumero({required this.auAppui});
+
+  final VoidCallback auAppui;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: Couleurs.fondPuceRouge,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.phone_in_talk_outlined,
+            size: 28,
+            color: Couleurs.rouge,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Entrez votre numéro de téléphone pour être visible par '
+                  'vos contacts.',
+                  style: Styles.gras(12, Colors.black, hauteur: 1.4),
+                ),
+                const SizedBox(height: 8),
+                GestureDetector(
+                  onTap: auAppui,
+                  child: Container(
+                    height: 32,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: Couleurs.rouge,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Text(
+                      'Ajouter mon numéro',
+                      style: Styles.gras(12, Colors.white),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Feuille du bas pour entrer son numéro. Se ferme avec `true` quand il est
+/// enregistré.
+class _FeuilleNumero extends StatefulWidget {
+  const _FeuilleNumero();
+
+  @override
+  State<_FeuilleNumero> createState() => _FeuilleNumeroState();
+}
+
+class _FeuilleNumeroState extends State<_FeuilleNumero> {
+  final TextEditingController _numero = TextEditingController();
+  final GlobalKey<ChampTexteState> _cleNumero = GlobalKey();
+  bool _enCours = false;
+  String? _erreur;
+
+  @override
+  void dispose() {
+    _numero.dispose();
+    super.dispose();
+  }
+
+  Future<void> _enregistrer() async {
+    // Un numéro vide ou trop court fait vibrer le champ.
+    if (normaliserTelephone(_numero.text).length < 8) {
+      _cleNumero.currentState?.signalerErreur();
+      return;
+    }
+    final auth = context.read<ServiceAuth>();
+    setState(() {
+      _enCours = true;
+      _erreur = null;
+    });
+    try {
+      await auth.modifierProfil(telephone: _numero.text.trim());
+      if (mounted) Navigator.of(context).pop(true);
+    } on ErreurAuth catch (e) {
+      if (mounted) setState(() => _erreur = e.message);
+    } finally {
+      if (mounted) setState(() => _enCours = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      // Remonte au-dessus du clavier.
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(22, 12, 22, 18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Couleurs.grisBordure,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text('Votre numéro', style: Styles.gras(18, Colors.black)),
+              const SizedBox(height: 6),
+              Text(
+                'Vos proches qui ont votre numéro dans leur téléphone vous '
+                'retrouveront sur StarPole.',
+                style: Styles.gras(
+                  12.5,
+                  Couleurs.grisTexte,
+                  hauteur: 1.5,
+                  poids: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 16),
+              ChampTexte(
+                key: _cleNumero,
+                controleur: _numero,
+                icone: Icons.phone_in_talk_outlined,
+                indication: 'Numéro de téléphone',
+                type: TextInputType.phone,
+                erreurEnRouge: true,
+              ),
+              if (_erreur != null) ...[
+                const SizedBox(height: 10),
+                Text(_erreur!, style: Styles.gras(12, Couleurs.rouge)),
+              ],
+              const SizedBox(height: 18),
+              BoutonRouge(
+                libelle: 'Enregistrer',
+                enCours: _enCours,
+                auAppui: _enregistrer,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

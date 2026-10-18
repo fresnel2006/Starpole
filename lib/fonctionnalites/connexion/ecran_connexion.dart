@@ -46,10 +46,6 @@ class _EcranConnexionState extends State<EcranConnexion> {
     // Un champ vide ou incorrect vibre et clignote en rouge.
     if (!emailValide(email)) {
       _cleIdentifiant.currentState?.signalerErreur();
-      // Un numéro de téléphone est compris, mais pas encore accepté.
-      if (!ressembleAUnEmail(email) && normaliserTelephone(email).length >= 8) {
-        _afficherMessage(messageNumeroBientot);
-      }
       return;
     }
 
@@ -176,8 +172,8 @@ class _EcranConnexionState extends State<EcranConnexion> {
                     key: _cleIdentifiant,
                     erreurEnRouge: true,
                     controleur: _identifiant,
-                    icone: Icons.contact_phone,
-                    indication: 'Email ou numero de telephone',
+                    icone: Icons.mark_email_unread_outlined,
+                    indication: 'Email',
                     type: TextInputType.emailAddress,
                   ),
                 ),

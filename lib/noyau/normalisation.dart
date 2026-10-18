@@ -18,9 +18,3 @@ bool ressembleAUnEmail(String saisie) => saisie.contains('@');
 bool emailValide(String email) =>
     email.length <= 254 &&
     RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email);
-
-/// Message affiché quand quelqu'un tape un numéro de téléphone pour se
-/// connecter : le code de confirmation n'est envoyé que par e-mail.
-const String messageNumeroBientot =
-    'La connexion par numéro de téléphone arrive bientôt. '
-    'Utilisez votre adresse e-mail.';

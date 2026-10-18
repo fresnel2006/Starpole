@@ -111,9 +111,10 @@ class _PhotoProfilModifiableState extends State<PhotoProfilModifiable> {
   Widget build(BuildContext context) {
     final t = widget.taille;
     final badge = t / 4;
-    // Si un appui personnalisé est donné (page Profil), seul le crayon réagit :
-    // un appui sur la photo elle-même ne fait rien.
-    final seulCrayon = widget.auAppui != null;
+    // Un appui sur la photo permet toujours de la changer. Si un appui
+    // personnalisé est donné (page Profil), le crayon, lui, fait autre chose
+    // (ouvrir la page de modification du profil).
+    final crayonSepare = widget.auAppui != null;
 
     final contenu = SizedBox(
       width: t + 6,
@@ -151,7 +152,7 @@ class _PhotoProfilModifiableState extends State<PhotoProfilModifiable> {
                 ),
               ),
             ),
-          if (seulCrayon)
+          if (crayonSepare)
             // Zone d'appui plus large que la pastille (48 pixels).
             Positioned(
               right: -(48 - badge) / 2,
@@ -176,7 +177,6 @@ class _PhotoProfilModifiableState extends State<PhotoProfilModifiable> {
       ),
     );
 
-    if (seulCrayon) return contenu;
     return Semantics(
       button: true,
       label: 'Modifier la photo de profil',

@@ -79,10 +79,6 @@ class _EcranInscriptionState extends State<EcranInscription> {
     final email = normaliserEmail(_identifiant.text);
     if (!emailValide(email)) {
       _cleIdentifiant.currentState?.signalerErreur();
-      // Un numéro de téléphone est compris, mais pas encore accepté.
-      if (!ressembleAUnEmail(email) && normaliserTelephone(email).length >= 8) {
-        _afficherMessage(messageNumeroBientot);
-      }
       return;
     }
     if (!_conditionsAcceptees) {
@@ -254,8 +250,8 @@ class _EcranInscriptionState extends State<EcranInscription> {
                   ChampTexte(
                     key: _cleIdentifiant,
                     controleur: _identifiant,
-                    icone: Icons.contact_phone,
-                    indication: 'Email ou numero de telephone',
+                    icone: Icons.mark_email_unread_outlined,
+                    indication: 'Email',
                     type: TextInputType.emailAddress,
                   ),
                 ),
