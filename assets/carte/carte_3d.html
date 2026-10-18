@@ -10,8 +10,13 @@
   html, body { margin: 0; height: 100%; overflow: hidden; background: #e9edf1; font-family: sans-serif; }
   #carte { position: absolute; inset: 0; }
 
-  /* La mention Mapbox reste visible au-dessus de la fiche du bas. */
+  /* La mention (le « i » des crédits) reste visible au-dessus de la fiche du bas. */
   .mapboxgl-ctrl-bottom-left, .mapboxgl-ctrl-bottom-right { bottom: var(--bas, 0px); }
+
+  /* Le logo Mapbox est masqué à la demande de l'équipe. Attention : les
+     conditions de Mapbox demandent de l'afficher ; à remettre (supprimer cette
+     règle) si le jeton est un jour suspendu. */
+  .mapboxgl-ctrl-logo { display: none !important; }
 
   /* Un repère d'alerte : une épingle de la couleur du type d'alerte. */
   .pin { position: relative; width: 38px; height: 46px; cursor: pointer;

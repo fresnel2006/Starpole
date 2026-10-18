@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:projet_starpole/application/application.dart';
+import 'package:projet_starpole/application/couleurs.dart';
 import 'package:projet_starpole/noyau/alerte.dart';
 import 'package:projet_starpole/partage/composants/carte_3d.dart';
 import 'package:projet_starpole/noyau/appel.dart';
@@ -1674,6 +1675,11 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Services'));
     await tester.pumpAndSettle();
+    // Le filtre actif se voit : l'icône devient bleue pour les services.
+    expect(
+      tester.widget<Icon>(find.byIcon(Icons.filter_alt_outlined)).color,
+      Couleurs.tuileService,
+    );
     expect(find.text('Don de riz'), findsNothing);
     expect(
       find.text("Aucune alerte avec une position pour l'instant."),

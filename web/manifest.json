@@ -1,6 +1,6 @@
 {
-    "name": "projet_starpole",
-    "short_name": "projet_starpole",
+    "name": "StarPole",
+    "short_name": "StarPole",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

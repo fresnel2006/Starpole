@@ -134,12 +134,18 @@ class _EcranCarteState extends State<EcranCarte> {
                         child: Stack(
                           clipBehavior: Clip.none,
                           children: [
-                            const Icon(
+                            // L'icône prend la couleur du type choisi (bleu pour
+                            // les services, vert pour les dons, rouge pour les
+                            // urgences), noire quand tout est montré.
+                            Icon(
                               Icons.filter_alt_outlined,
                               size: 28,
-                              color: Colors.black,
+                              color: _filtre == null
+                                  ? Colors.black
+                                  : couleurFiltre(_filtre!),
                             ),
-                            // Un point rouge rappelle qu'un filtre est actif.
+                            // Un point de la même couleur rappelle qu'un
+                            // filtre est actif.
                             if (_filtre != null)
                               Positioned(
                                 right: -2,
@@ -147,8 +153,8 @@ class _EcranCarteState extends State<EcranCarte> {
                                 child: Container(
                                   width: 10,
                                   height: 10,
-                                  decoration: const BoxDecoration(
-                                    color: Couleurs.rouge,
+                                  decoration: BoxDecoration(
+                                    color: couleurFiltre(_filtre!),
                                     shape: BoxShape.circle,
                                   ),
                                 ),
@@ -191,6 +197,11 @@ class _EcranCarteState extends State<EcranCarte> {
     );
   }
 }
+
+/// La couleur d'un type dans le filtre : rouge pour les urgences, vert pour les
+/// dons et bleu pour les services (comme les tuiles de « Poster une alerte »).
+Color couleurFiltre(TypeAlerte type) =>
+    type == TypeAlerte.service ? Couleurs.tuileService : type.couleur;
 
 /// Ce que renvoie la feuille de filtre (un type, ou null pour « tous »).
 class _ChoixFiltre {
@@ -236,7 +247,7 @@ class _FeuilleFiltre extends StatelessWidget {
             for (final type in TypeAlerte.values)
               _OptionFiltre(
                 texte: type.libelle,
-                couleur: type.couleur,
+                couleur: couleurFiltre(type),
                 choisie: actuel == type,
                 choix: _ChoixFiltre(type),
               ),
@@ -265,8 +276,15 @@ class _OptionFiltre extends StatelessWidget {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () => Navigator.of(context).pop(choix),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 14),
+      // L'option choisie se reconnaît à sa couleur : fond teinté, texte et
+      // coche de la couleur du type (bleu pour les services).
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 3),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+        decoration: BoxDecoration(
+          color: choisie ? couleur.withValues(alpha: 0.12) : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+        ),
         child: Row(
           children: [
             Container(
@@ -275,9 +293,13 @@ class _OptionFiltre extends StatelessWidget {
               decoration: BoxDecoration(color: couleur, shape: BoxShape.circle),
             ),
             const SizedBox(width: 16),
-            Expanded(child: Text(texte, style: Styles.gras(15, Colors.black))),
-            if (choisie)
-              const Icon(Icons.check, size: 24, color: Couleurs.rouge),
+            Expanded(
+              child: Text(
+                texte,
+                style: Styles.gras(15, choisie ? couleur : Colors.black),
+              ),
+            ),
+            if (choisie) Icon(Icons.check, size: 24, color: couleur),
           ],
         ),
       ),
