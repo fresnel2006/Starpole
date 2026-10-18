@@ -1,6 +1,4 @@
-import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -8,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
 import 'normalisation.dart';
+import 'serveur_starpole.dart';
 
 /// Erreur d'inscription ou de connexion, avec un message déjà en français
 /// que l'on peut afficher tel quel à l'utilisateur.
@@ -93,46 +92,16 @@ class ServiceAuthFirebase implements ServiceAuth {
   @override
   bool get estConnecte => _auth.currentUser != null;
 
-  /// L'adresse du serveur StarPole (FastAPI sur Vercel). Elle est publique.
-  static const String _serveur = 'https://starpole-backend.vercel.app';
-
   /// Envoie une demande au serveur et renvoie sa réponse. Les erreurs du
   /// serveur ont déjà un message en français, qui est repris tel quel.
   Future<Map<String, dynamic>> _appelerServeur(
     String chemin,
     Map<String, dynamic> corps,
   ) async {
-    final client = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 20);
     try {
-      final requete = await client.postUrl(Uri.parse('$_serveur$chemin'));
-      requete.headers.contentType = ContentType.json;
-      requete.write(jsonEncode(corps));
-      final reponse = await requete.close().timeout(
-        const Duration(seconds: 30),
-      );
-      final texte = await reponse.transform(utf8.decoder).join();
-      Map<String, dynamic> donnees = {};
-      try {
-        donnees = jsonDecode(texte) as Map<String, dynamic>;
-      } catch (_) {
-        // Réponse inattendue : on garde un dictionnaire vide.
-      }
-      if (reponse.statusCode >= 400) {
-        throw ErreurAuth(
-          (donnees['erreur'] as String?) ??
-              'Le serveur a rencontré un problème. Réessayez.',
-        );
-      }
-      return donnees;
-    } on SocketException {
-      throw const ErreurAuth('Pas de connexion internet.');
-    } on TimeoutException {
-      throw const ErreurAuth('Le serveur ne répond pas. Réessayez.');
-    } on HandshakeException {
-      throw const ErreurAuth('Connexion au serveur impossible. Réessayez.');
-    } finally {
-      client.close();
+      return await ServeurStarPole.envoyer(chemin, corps);
+    } on ErreurServeur catch (e) {
+      throw ErreurAuth(e.message);
     }
   }
 

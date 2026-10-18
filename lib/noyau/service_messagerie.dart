@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -6,6 +7,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import 'messagerie.dart';
 import 'normalisation.dart';
+import 'serveur_starpole.dart';
 
 /// Erreur de messagerie, avec un message en français prêt à afficher.
 class ErreurMessagerie implements Exception {
@@ -49,17 +51,40 @@ abstract class ServiceMessagerie {
   Stream<List<Message>> messages(String conversationId);
 
   /// Envoie un message. Une [photo] ou une position ([latitude] et
-  /// [longitude]) peuvent l'accompagner.
+  /// [longitude]) peuvent l'accompagner. Pour répondre à un message précis,
+  /// [reponseTexte] est le texte cité et [reponseAuteurId] son auteur.
   Future<void> envoyerMessage(
     String conversationId,
     String texte, {
     Uint8List? photo,
     double? latitude,
     double? longitude,
+    String? reponseTexte,
+    String? reponseAuteurId,
+  });
+
+  /// Modifie le texte d'un de mes messages. [dernier] dit si c'est le dernier
+  /// de la conversation (l'aperçu de la liste est alors mis à jour).
+  Future<void> modifierMessage(
+    String conversationId,
+    String messageId,
+    String texte, {
+    required bool dernier,
   });
 
   /// Indique que j'ai lu la conversation.
   Future<void> marquerLu(String conversationId);
+
+  /// Dit que je suis connecté en ce moment (à répéter tant que l'appli est
+  /// ouverte) : c'est ce qui affiche deux coches chez l'expéditeur.
+  Future<void> signalerPresence();
+
+  /// La date à laquelle [autreId] a lu la conversation (null s'il ne l'a
+  /// jamais ouverte), en direct.
+  Stream<DateTime?> luParAutre(String conversationId, String autreId);
+
+  /// La dernière fois que [autreId] était connecté, en direct.
+  Stream<DateTime?> presenceDe(String autreId);
 
   /// Le nom et la photo d'une personne (gardés en mémoire après la 1re fois).
   Future<Contact?> profilDe(String id);
@@ -282,6 +307,8 @@ class ServiceMessagerieFirebase implements ServiceMessagerie {
     Uint8List? photo,
     double? latitude,
     double? longitude,
+    String? reponseTexte,
+    String? reponseAuteurId,
   }) async {
     final moi = _moi();
     final nettoye = texte.trim();
@@ -297,11 +324,13 @@ class ServiceMessagerieFirebase implements ServiceMessagerie {
         if (photo != null) 'photo': base64Encode(photo),
         'latitude': ?latitude,
         'longitude': ?longitude,
+        if (reponseTexte != null) ...{
+          'reponseTexte': _apercu(reponseTexte, 150),
+          'reponseAuteurId': reponseAuteurId ?? '',
+        },
       });
       lot.update(conversation, {
-        'dernierMessage': nettoye.length > 120
-            ? '${nettoye.substring(0, 120)}...'
-            : nettoye,
+        'dernierMessage': _apercu(nettoye, 120),
         'dernierAuteurId': moi,
         'dernierTemps': FieldValue.serverTimestamp(),
         'lu.$moi': FieldValue.serverTimestamp(),
@@ -311,6 +340,54 @@ class ServiceMessagerieFirebase implements ServiceMessagerie {
       throw const ErreurMessagerie(
         "Impossible d'envoyer le message. Vérifiez votre connexion.",
       );
+    }
+    // Le message est parti : on prévient le serveur, qui envoie la
+    // notification à l'autre personne (sans attendre sa réponse).
+    unawaited(_prevenirLeServeur(conversationId));
+  }
+
+  /// Coupe un texte trop long en ajoutant « ... ».
+  String _apercu(String texte, int max) =>
+      texte.length > max ? '${texte.substring(0, max)}...' : texte;
+
+  @override
+  Future<void> modifierMessage(
+    String conversationId,
+    String messageId,
+    String texte, {
+    required bool dernier,
+  }) async {
+    final nettoye = texte.trim();
+    if (nettoye.isEmpty) return;
+    final conversation = _base.collection('conversations').doc(conversationId);
+    try {
+      final lot = _base.batch();
+      lot.update(conversation.collection('messages').doc(messageId), {
+        'texte': nettoye,
+        'modifie': true,
+      });
+      if (dernier) {
+        lot.update(conversation, {'dernierMessage': _apercu(nettoye, 120)});
+      }
+      await lot.commit();
+    } on FirebaseException {
+      throw const ErreurMessagerie(
+        'Impossible de modifier le message. Vérifiez votre connexion.',
+      );
+    }
+  }
+
+  /// Demande au serveur de notifier l'autre personne. Une erreur ici n'est pas
+  /// grave : le message est déjà envoyé et se lira en ouvrant l'appli.
+  Future<void> _prevenirLeServeur(String conversationId) async {
+    try {
+      final jeton = await _auth.currentUser?.getIdToken();
+      if (jeton == null) return;
+      await ServeurStarPole.envoyer('/notifications/message', {
+        'conversationId': conversationId,
+      }, jeton: jeton);
+    } catch (_) {
+      // Notification non envoyée : sans conséquence pour le message.
     }
   }
 
@@ -325,6 +402,40 @@ class ServiceMessagerieFirebase implements ServiceMessagerie {
     } on FirebaseException {
       // Pas grave : ce sera refait à la prochaine ouverture.
     }
+  }
+
+  @override
+  Future<void> signalerPresence() async {
+    final moi = utilisateurId;
+    if (moi == null) return;
+    try {
+      await _base.collection('utilisateurs').doc(moi).update({
+        'vuLe': FieldValue.serverTimestamp(),
+      });
+    } on FirebaseException {
+      // Pas grave : ce sera refait au prochain signal.
+    }
+  }
+
+  @override
+  Stream<DateTime?> luParAutre(String conversationId, String autreId) {
+    return _base
+        .collection('conversations')
+        .doc(conversationId)
+        .snapshots()
+        .map((doc) {
+          final lu = doc.data()?['lu'];
+          final date = lu is Map ? lu[autreId] : null;
+          return date is Timestamp ? date.toDate() : null;
+        });
+  }
+
+  @override
+  Stream<DateTime?> presenceDe(String autreId) {
+    return _base.collection('utilisateurs').doc(autreId).snapshots().map((doc) {
+      final date = doc.data()?['vuLe'];
+      return date is Timestamp ? date.toDate() : null;
+    });
   }
 
   @override

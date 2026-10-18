@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../application/couleurs.dart';
 import '../../noyau/service_auth.dart';
 import '../../noyau/service_carnet.dart';
+import '../../noyau/service_notifications.dart';
 import '../../partage/composants/entete_retour.dart';
 import '../../partage/composants/ligne_menu.dart';
 import '../../partage/styles.dart';
@@ -64,6 +65,7 @@ class EcranParametres extends StatelessWidget {
   /// Demande confirmation, puis déconnecte et revient à la page de connexion.
   Future<void> _seDeconnecter(BuildContext context) async {
     final auth = context.read<ServiceAuth>();
+    final notifications = context.read<ServiceNotifications>();
     final navigateur = Navigator.of(context);
     final confirme = await showDialog<bool>(
       context: context,
@@ -96,6 +98,8 @@ class EcranParametres extends StatelessWidget {
       ),
     );
     if (confirme != true) return;
+    // Ce téléphone ne doit plus recevoir les notifications de ce compte.
+    await notifications.desactiver();
     await auth.deconnecter();
     await navigateur.pushAndRemoveUntil(
       MaterialPageRoute<void>(builder: (_) => const EcranConnexion()),

@@ -10,6 +10,7 @@ import '../noyau/service_auth.dart';
 import '../noyau/service_carnet.dart';
 import '../noyau/service_localisation.dart';
 import '../noyau/service_messagerie.dart';
+import '../noyau/service_notifications.dart';
 import '../noyau/service_photo.dart';
 import '../partage/adaptatif.dart';
 import '../partage/composants/carte_3d.dart';
@@ -26,6 +27,7 @@ class ApplicationStarPole extends StatelessWidget {
     this.carnet,
     this.appels,
     this.constructeurCarte,
+    this.notifications,
   });
 
   /// Le service de compte (Firebase dans l'appli, un faux dans les tests).
@@ -52,6 +54,9 @@ class ApplicationStarPole extends StatelessWidget {
   /// La fabrique de la carte (une fausse carte dans les tests).
   final ConstructeurCarte? constructeurCarte;
 
+  /// Les notifications (de fausses notifications dans les tests).
+  final ServiceNotifications? notifications;
+
   @override
   Widget build(BuildContext context) {
     final servicePosition = localisation ?? ServiceLocalisationReel();
@@ -64,6 +69,9 @@ class ApplicationStarPole extends StatelessWidget {
         Provider<ServiceLocalisation>.value(value: servicePosition),
         Provider<ServiceCarnet>.value(value: carnet ?? ServiceCarnetReel()),
         Provider<ServiceAppel>.value(value: appels ?? ServiceAppelFirebase()),
+        Provider<ServiceNotifications>.value(
+          value: notifications ?? ServiceNotificationsFirebase(),
+        ),
         Provider<ConstructeurCarte>.value(
           value: constructeurCarte ?? construireCarte3d,
         ),

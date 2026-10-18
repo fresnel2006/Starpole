@@ -34,6 +34,7 @@ class _EcranPosterAlerteState extends State<EcranPosterAlerte> {
   final TextEditingController _description = TextEditingController();
   final GlobalKey<VibrantState> _cleTitre = GlobalKey();
   final GlobalKey<VibrantState> _cleDescription = GlobalKey();
+  final GlobalKey<VibrantState> _clePhoto = GlobalKey();
 
   TypeAlerte _type = TypeAlerte.urgence;
   Uint8List? _photo;
@@ -65,12 +66,15 @@ class _EcranPosterAlerteState extends State<EcranPosterAlerte> {
 
   /// Vérifie le formulaire, puis enregistre l'alerte avec la vraie position.
   Future<void> _publier() async {
-    // Titre ou description vides : la zone vibre et clignote, sans message.
+    // Titre, description ou photo manquants : la zone vibre et clignote, sans
+    // message. La photo est obligatoire pour publier une alerte.
     final titreVide = _titre.text.trim().isEmpty;
     final descriptionVide = _description.text.trim().isEmpty;
-    if (titreVide || descriptionVide) {
+    final photoAbsente = _photo == null;
+    if (titreVide || descriptionVide || photoAbsente) {
       if (titreVide) _cleTitre.currentState?.signalerErreur();
       if (descriptionVide) _cleDescription.currentState?.signalerErreur();
+      if (photoAbsente) _clePhoto.currentState?.signalerErreur();
       return;
     }
 
@@ -279,10 +283,14 @@ class _EcranPosterAlerteState extends State<EcranPosterAlerte> {
                       ),
                       const SizedBox(width: 12),
                       Expanded(
-                        child: _CartePhoto(
-                          photo: _photo,
-                          auAppui: _choisirPhoto,
-                          auRetrait: () => setState(() => _photo = null),
+                        child: Vibrant(
+                          key: _clePhoto,
+                          rayon: 10,
+                          child: _CartePhoto(
+                            photo: _photo,
+                            auAppui: _choisirPhoto,
+                            auRetrait: () => setState(() => _photo = null),
+                          ),
                         ),
                       ),
                     ],

@@ -18,6 +18,16 @@ service cloud.firestore {
             || request.resource.data.photo.size() < 300000);
       allow delete: if false;
 
+      // Mes appareils (jetons de notification) : je les enregistre et les
+      // retire moi-même. Le serveur les lit avec ses propres droits.
+      match /appareils/{jeton} {
+        allow read, delete: if request.auth != null && request.auth.uid == uid;
+        allow create, update: if request.auth != null
+          && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly(['creeLe', 'plateforme'])
+          && jeton.size() < 400;
+      }
+
       // Mes contacts : visibles et modifiables par moi seul.
       match /contacts/{contactId} {
         allow read: if request.auth != null && request.auth.uid == uid;
@@ -155,7 +165,12 @@ service cloud.firestore {
         allow create: if request.auth != null
           && request.auth.uid in get(/databases/$(database)/documents/conversations/$(cid)).data.participants
           && request.resource.data.keys().hasOnly(
-               ['texte', 'auteurId', 'creeLe', 'photo', 'latitude', 'longitude'])
+               ['texte', 'auteurId', 'creeLe', 'photo', 'latitude', 'longitude',
+                'reponseTexte', 'reponseAuteurId'])
+          && (!('reponseTexte' in request.resource.data)
+              || (request.resource.data.reponseTexte is string
+                  && request.resource.data.reponseTexte.size() <= 200
+                  && request.resource.data.reponseAuteurId is string))
           && request.resource.data.auteurId == request.auth.uid
           && request.resource.data.texte is string
           && request.resource.data.texte.size() > 0
@@ -168,7 +183,16 @@ service cloud.firestore {
           && (!('latitude' in request.resource.data)
               || (request.resource.data.latitude is number
                   && request.resource.data.longitude is number));
-        allow update, delete: if false;
+        // Seul l'auteur peut modifier le texte de son message (et rien d'autre).
+        allow update: if request.auth != null
+          && request.auth.uid == resource.data.auteurId
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['texte', 'modifie'])
+          && request.resource.data.texte is string
+          && request.resource.data.texte.size() > 0
+          && request.resource.data.texte.size() <= 1000
+          && request.resource.data.modifie == true;
+        allow delete: if false;
       }
     }
 

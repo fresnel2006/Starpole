@@ -11,11 +11,13 @@ import '../../noyau/service_photo.dart';
 import '../../noyau/appel.dart';
 import '../../noyau/service_appel.dart';
 import '../../noyau/service_messagerie.dart';
+import '../../noyau/service_notifications.dart';
 import '../../partage/composants/avatar_utilisateur.dart';
 import '../../partage/composants/vibrant.dart';
 import '../../partage/composants/couche_tuiles.dart';
 import '../../partage/styles.dart';
 import '../appel/ecran_appel.dart';
+import 'ecran_medias.dart';
 
 /// Une conversation avec une autre personne : ses messages en direct, la zone
 /// pour écrire et l'envoi.
@@ -41,22 +43,48 @@ class _EcranConversationState extends State<EcranConversation> {
     widget.conversationId,
   );
 
+  late final Stream<DateTime?> _luParAutre = _service.luParAutre(
+    widget.conversationId,
+    widget.autreId,
+  );
+  late final Stream<DateTime?> _presenceAutre = _service.presenceDe(
+    widget.autreId,
+  );
+
   final TextEditingController _saisie = TextEditingController();
+
+  /// Recherche dans la conversation (ouverte par le menu des trois points).
+  final TextEditingController _requete = TextEditingController();
+  bool _rechercheOuverte = false;
   final GlobalKey<VibrantState> _cleSaisie = GlobalKey();
 
   /// Le dernier message que j'ai marqué comme lu (pour ne pas le refaire).
   String? _dernierLu;
   bool _envoiEnCours = false;
 
+  /// L'identifiant du dernier message de la conversation.
+  String? _idDernier;
+
+  /// Le message auquel je suis en train de répondre (glissé vers la gauche).
+  Message? _reponseA;
+
+  /// Mon message que je suis en train de modifier.
+  Message? _enModification;
+
   @override
   void initState() {
     super.initState();
     _service.marquerLu(widget.conversationId);
+    conversationAffichee.value = widget.conversationId;
   }
 
   @override
   void dispose() {
+    if (conversationAffichee.value == widget.conversationId) {
+      conversationAffichee.value = null;
+    }
     _saisie.dispose();
+    _requete.dispose();
     super.dispose();
   }
 
@@ -66,7 +94,139 @@ class _EcranConversationState extends State<EcranConversation> {
       ..showSnackBar(SnackBar(content: Text(texte)));
   }
 
-  /// Envoie le message écrit. S'il est vide, la zone vibre et clignote.
+  /// Le nom à afficher pour l'auteur d'un message cité.
+  String _nomDe(String? auteurId) =>
+      auteurId == _service.utilisateurId ? 'Vous' : widget.autreNom;
+
+  /// Prépare une réponse au message [message].
+  void _repondre(Message message) {
+    setState(() {
+      if (_enModification != null) _saisie.clear();
+      _enModification = null;
+      _reponseA = message;
+    });
+  }
+
+  /// Passe en mode modification : le texte du message revient dans la zone.
+  void _modifier(Message message) {
+    setState(() {
+      _reponseA = null;
+      _enModification = message;
+      _saisie.text = message.texte;
+      _saisie.selection = TextSelection.collapsed(offset: message.texte.length);
+    });
+  }
+
+  void _annulerBandeau() {
+    setState(() {
+      if (_enModification != null) _saisie.clear();
+      _reponseA = null;
+      _enModification = null;
+    });
+  }
+
+  /// Menu des trois points de l'en-tête.
+  Future<void> _ouvrirMenuConversation() async {
+    final choix = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (contexte) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            _ActionMenu(
+              icone: Icons.search,
+              texte: 'Rechercher un message',
+              auAppui: () => Navigator.of(contexte).pop('rechercher'),
+            ),
+            _ActionMenu(
+              icone: Icons.photo_library_outlined,
+              texte: 'Photos et positions',
+              auAppui: () => Navigator.of(contexte).pop('medias'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (choix == 'rechercher') setState(() => _rechercheOuverte = true);
+    if (choix == 'medias') {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) =>
+              EcranMedias(messages: _service.messages(widget.conversationId)),
+        ),
+      );
+    }
+  }
+
+  void _fermerRecherche() {
+    setState(() {
+      _rechercheOuverte = false;
+      _requete.clear();
+    });
+  }
+
+  /// Menu d'un message (appui long) : répondre, et modifier si c'est le mien.
+  Future<void> _ouvrirMenu(Message message) async {
+    final estMien = message.auteurId == _service.utilisateurId;
+    final modifiable =
+        estMien && message.photo == null && !message.aUnePosition;
+    final choix = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (contexte) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            _ActionMenu(
+              icone: Icons.reply,
+              texte: 'Répondre',
+              auAppui: () => Navigator.of(contexte).pop('repondre'),
+            ),
+            if (modifiable)
+              _ActionMenu(
+                icone: Icons.edit_outlined,
+                texte: 'Modifier',
+                auAppui: () => Navigator.of(contexte).pop('modifier'),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (choix == 'repondre') _repondre(message);
+    if (choix == 'modifier') _modifier(message);
+  }
+
+  /// Le nombre de coches d'un message que j'ai envoyé : 1 envoyé, 2 la personne
+  /// est connectée (reçu), 3 elle a lu la conversation.
+  int _coches(Message message, DateTime? luLe, DateTime? vuLe) {
+    if (luLe != null && !luLe.isBefore(message.creeLe)) return 3;
+    if (vuLe != null &&
+        (!vuLe.isBefore(message.creeLe) ||
+            DateTime.now().difference(vuLe) < const Duration(seconds: 90))) {
+      return 2;
+    }
+    return 1;
+  }
+
+  /// Le texte qu'on cite : celui du message, ou un mot pour une photo.
+  String _resume(Message message) =>
+      message.photo != null ? 'Photo' : message.texte;
+
+  /// Envoie le message écrit (ou enregistre la modification). S'il est vide,
+  /// la zone vibre et clignote.
   Future<void> _envoyer() async {
     final texte = _saisie.text.trim();
     if (texte.isEmpty) {
@@ -75,8 +235,32 @@ class _EcranConversationState extends State<EcranConversation> {
     }
     setState(() => _envoiEnCours = true);
     try {
-      await _service.envoyerMessage(widget.conversationId, texte);
-      if (mounted) _saisie.clear();
+      final modification = _enModification;
+      if (modification != null) {
+        if (texte != modification.texte) {
+          await _service.modifierMessage(
+            widget.conversationId,
+            modification.id,
+            texte,
+            dernier: modification.id == _idDernier,
+          );
+        }
+      } else {
+        final citation = _reponseA;
+        await _service.envoyerMessage(
+          widget.conversationId,
+          texte,
+          reponseTexte: citation == null ? null : _resume(citation),
+          reponseAuteurId: citation?.auteurId,
+        );
+      }
+      if (mounted) {
+        _saisie.clear();
+        setState(() {
+          _reponseA = null;
+          _enModification = null;
+        });
+      }
     } on ErreurMessagerie catch (e) {
       if (mounted) _afficherMessage(e.message);
     } finally {
@@ -168,6 +352,7 @@ class _EcranConversationState extends State<EcranConversation> {
   void _marquerLuSiBesoin(List<Message> messages) {
     if (messages.isEmpty) return;
     final dernier = messages.last;
+    _idDernier = dernier.id;
     if (dernier.auteurId == _service.utilisateurId) return;
     if (dernier.id == _dernierLu) return;
     _dernierLu = dernier.id;
@@ -183,12 +368,20 @@ class _EcranConversationState extends State<EcranConversation> {
       body: SafeArea(
         child: Column(
           children: [
-            _Entete(
-              autreId: widget.autreId,
-              autreNom: widget.autreNom,
-              auAppel: () => _appeler(video: false),
-              auVideo: () => _appeler(video: true),
-            ),
+            if (_rechercheOuverte)
+              _EnteteRecherche(
+                controleur: _requete,
+                auChangement: () => setState(() {}),
+                auFermer: _fermerRecherche,
+              )
+            else
+              _Entete(
+                autreId: widget.autreId,
+                autreNom: widget.autreNom,
+                auAppel: () => _appeler(video: false),
+                auVideo: () => _appeler(video: true),
+                auMenu: _ouvrirMenuConversation,
+              ),
             Expanded(
               child: StreamBuilder<List<Message>>(
                 stream: _flux,
@@ -213,22 +406,52 @@ class _EcranConversationState extends State<EcranConversation> {
                   }
                   // La liste est « à l'envers » : le dernier message est en bas
                   // et reste visible quand il arrive.
-                  final inverses = messages.reversed.toList();
-                  return ListView.builder(
-                    reverse: true,
-                    padding: const EdgeInsets.fromLTRB(18, 18, 18, 8),
-                    itemCount: inverses.length,
-                    itemBuilder: (context, i) => Padding(
-                      padding: const EdgeInsets.only(bottom: 14),
-                      child: _Bulle(
-                        message: inverses[i],
-                        envoye: inverses[i].auteurId == moi,
-                      ),
-                    ),
+                  final recherche = _requete.text.trim().toLowerCase();
+                  final visibles = recherche.isEmpty
+                      ? messages
+                      : messages
+                            .where(
+                              (m) => m.texte.toLowerCase().contains(recherche),
+                            )
+                            .toList();
+                  final inverses = visibles.reversed.toList();
+                  return _Statuts(
+                    luParAutre: _luParAutre,
+                    presenceAutre: _presenceAutre,
+                    builder: (luLe, vuLe) => visibles.isEmpty
+                        ? const _Centre('Aucun message.')
+                        : ListView.builder(
+                            reverse: true,
+                            padding: const EdgeInsets.fromLTRB(18, 18, 18, 8),
+                            itemCount: inverses.length,
+                            itemBuilder: (context, i) => Padding(
+                              padding: const EdgeInsets.only(bottom: 14),
+                              child: _Glissable(
+                                auGlisse: () => _repondre(inverses[i]),
+                                auLongAppui: () => _ouvrirMenu(inverses[i]),
+                                child: _Bulle(
+                                  message: inverses[i],
+                                  envoye: inverses[i].auteurId == moi,
+                                  nomCite: _nomDe(inverses[i].reponseAuteurId),
+                                  coches: inverses[i].auteurId == moi
+                                      ? _coches(inverses[i], luLe, vuLe)
+                                      : 0,
+                                ),
+                              ),
+                            ),
+                          ),
                   );
                 },
               ),
             ),
+            if (_reponseA != null || _enModification != null)
+              _BandeauReponse(
+                titre: _enModification != null
+                    ? 'Modification du message'
+                    : 'Réponse à ${_nomDe(_reponseA!.auteurId)}',
+                texte: _resume(_enModification ?? _reponseA!),
+                auFermer: _annulerBandeau,
+              ),
             _ZoneSaisie(
               controleur: _saisie,
               cle: _cleSaisie,
@@ -270,12 +493,14 @@ class _Entete extends StatelessWidget {
     required this.autreNom,
     required this.auAppel,
     required this.auVideo,
+    required this.auMenu,
   });
 
   final String autreId;
   final String autreNom;
   final VoidCallback auAppel;
   final VoidCallback auVideo;
+  final VoidCallback auMenu;
 
   @override
   Widget build(BuildContext context) {
@@ -346,7 +571,74 @@ class _Entete extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          const Icon(Icons.more_vert, size: 24, color: Colors.black),
+          Semantics(
+            button: true,
+            label: 'Plus d\'options',
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: auMenu,
+              child: const Padding(
+                padding: EdgeInsets.all(4),
+                child: Icon(Icons.more_vert, size: 24, color: Colors.black),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// En-tête de la recherche : flèche pour fermer et champ de saisie.
+class _EnteteRecherche extends StatelessWidget {
+  const _EnteteRecherche({
+    required this.controleur,
+    required this.auChangement,
+    required this.auFermer,
+  });
+
+  final TextEditingController controleur;
+  final VoidCallback auChangement;
+  final VoidCallback auFermer;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(8, 8, 16, 10),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Color(0x1F000000),
+            blurRadius: 5,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          GestureDetector(
+            onTap: auFermer,
+            child: const SizedBox(
+              width: 38,
+              height: 40,
+              child: Icon(Icons.chevron_left, size: 34, color: Colors.black),
+            ),
+          ),
+          Expanded(
+            child: TextField(
+              controller: controleur,
+              autofocus: true,
+              onChanged: (_) => auChangement(),
+              style: Styles.gras(13, Colors.black),
+              decoration: InputDecoration(
+                hintText: 'Rechercher un message',
+                hintStyle: Styles.gras(12.5, Couleurs.grisIndication),
+                border: InputBorder.none,
+                isDense: true,
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -354,10 +646,21 @@ class _Entete extends StatelessWidget {
 }
 
 class _Bulle extends StatelessWidget {
-  const _Bulle({required this.message, required this.envoye});
+  const _Bulle({
+    required this.message,
+    required this.envoye,
+    required this.nomCite,
+    required this.coches,
+  });
 
   final Message message;
   final bool envoye;
+
+  /// Coches d'un message envoyé (0 pour un message reçu).
+  final int coches;
+
+  /// Le nom de l'auteur du message cité (« Vous » ou l'autre personne).
+  final String nomCite;
 
   @override
   Widget build(BuildContext context) {
@@ -381,6 +684,14 @@ class _Bulle extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (message.estUneReponse) ...[
+                _Citation(
+                  nom: nomCite,
+                  texte: message.reponseTexte!,
+                  surRouge: envoye,
+                ),
+                const SizedBox(height: 6),
+              ],
               if (message.photo != null) ...[
                 ClipRRect(
                   borderRadius: BorderRadius.circular(10),
@@ -412,13 +723,273 @@ class _Bulle extends StatelessWidget {
                   ),
                 ),
               const SizedBox(height: 4),
-              Text(
-                heureCourte(message.creeLe),
-                style: Styles.gras(9, couleurHeure, poids: FontWeight.w500),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    message.modifie
+                        ? 'Modifié  ${heureCourte(message.creeLe)}'
+                        : heureCourte(message.creeLe),
+                    style: Styles.gras(9, couleurHeure, poids: FontWeight.w500),
+                  ),
+                  if (coches > 0) ...[
+                    const SizedBox(width: 5),
+                    _Coches(nombre: coches),
+                  ],
+                ],
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Suit en direct la lecture et la présence de l'autre personne.
+class _Statuts extends StatelessWidget {
+  const _Statuts({
+    required this.luParAutre,
+    required this.presenceAutre,
+    required this.builder,
+  });
+
+  final Stream<DateTime?> luParAutre;
+  final Stream<DateTime?> presenceAutre;
+  final Widget Function(DateTime? luLe, DateTime? vuLe) builder;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<DateTime?>(
+      stream: luParAutre,
+      builder: (context, lu) => StreamBuilder<DateTime?>(
+        stream: presenceAutre,
+        builder: (context, presence) => builder(lu.data, presence.data),
+      ),
+    );
+  }
+}
+
+/// Les coches d'un message envoyé : une (envoyé), deux (reçu) ou trois (vu).
+class _Coches extends StatelessWidget {
+  const _Coches({required this.nombre});
+
+  final int nombre;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: switch (nombre) {
+        1 => 'Envoyé',
+        2 => 'Reçu',
+        _ => 'Vu',
+      },
+      child: SizedBox(
+        width: 12 + (nombre - 1) * 5.0,
+        height: 12,
+        child: Stack(
+          children: [
+            for (var i = 0; i < nombre; i++)
+              Positioned(
+                left: i * 5.0,
+                child: Icon(
+                  Icons.check,
+                  size: 12,
+                  color: nombre == 3 ? Colors.white : const Color(0xB3FFFFFF),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Le message cité dans une réponse.
+class _Citation extends StatelessWidget {
+  const _Citation({
+    required this.nom,
+    required this.texte,
+    required this.surRouge,
+  });
+
+  final String nom;
+  final String texte;
+  final bool surRouge;
+
+  @override
+  Widget build(BuildContext context) {
+    final fond = surRouge ? const Color(0x33FFFFFF) : const Color(0xFFE3EBE8);
+    final couleurNom = surRouge ? Colors.white : Couleurs.rouge;
+    final couleurTexte = surRouge ? const Color(0xE6FFFFFF) : Colors.black87;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
+      decoration: BoxDecoration(
+        color: fond,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(nom, style: Styles.gras(10.5, couleurNom)),
+          Text(
+            texte,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: Styles.gras(
+              11,
+              couleurTexte,
+              hauteur: 1.4,
+              poids: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Fait glisser un message vers la droite pour y répondre (comme WhatsApp) ;
+/// un appui long ouvre le menu du message.
+class _Glissable extends StatefulWidget {
+  const _Glissable({
+    required this.child,
+    required this.auGlisse,
+    required this.auLongAppui,
+  });
+
+  final Widget child;
+  final VoidCallback auGlisse;
+  final VoidCallback auLongAppui;
+
+  @override
+  State<_Glissable> createState() => _GlissableState();
+}
+
+class _GlissableState extends State<_Glissable> {
+  static const double _seuil = 56;
+  double _decalage = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final progression = (_decalage / _seuil).clamp(0.0, 1.0);
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onLongPress: widget.auLongAppui,
+      onHorizontalDragUpdate: (d) => setState(
+        () => _decalage = (_decalage + d.delta.dx).clamp(0.0, _seuil * 1.4),
+      ),
+      onHorizontalDragEnd: (_) {
+        if (_decalage >= _seuil) widget.auGlisse();
+        setState(() => _decalage = 0);
+      },
+      onHorizontalDragCancel: () => setState(() => _decalage = 0),
+      child: Stack(
+        alignment: Alignment.centerLeft,
+        children: [
+          Opacity(
+            opacity: progression,
+            child: const Padding(
+              padding: EdgeInsets.only(left: 4),
+              child: Icon(Icons.reply, size: 22, color: Couleurs.grisTexte),
+            ),
+          ),
+          Transform.translate(
+            offset: Offset(_decalage, 0),
+            child: widget.child,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Une ligne du menu d'un message.
+class _ActionMenu extends StatelessWidget {
+  const _ActionMenu({
+    required this.icone,
+    required this.texte,
+    required this.auAppui,
+  });
+
+  final IconData icone;
+  final String texte;
+  final VoidCallback auAppui;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: auAppui,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+        child: Row(
+          children: [
+            Icon(icone, size: 24, color: Colors.black),
+            const SizedBox(width: 16),
+            Text(texte, style: Styles.gras(14, Colors.black)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Bandeau au-dessus de la zone de saisie : message auquel on répond, ou
+/// message en cours de modification.
+class _BandeauReponse extends StatelessWidget {
+  const _BandeauReponse({
+    required this.titre,
+    required this.texte,
+    required this.auFermer,
+  });
+
+  final String titre;
+  final String texte;
+  final VoidCallback auFermer;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+      padding: const EdgeInsets.fromLTRB(14, 8, 6, 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF1F6F4),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(titre, style: Styles.gras(11, Couleurs.rouge)),
+                Text(
+                  texte,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Styles.gras(
+                    11.5,
+                    Colors.black87,
+                    poids: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Semantics(
+            button: true,
+            label: 'Annuler',
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: auFermer,
+              child: const Padding(
+                padding: EdgeInsets.all(8),
+                child: Icon(Icons.close, size: 20, color: Colors.black),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

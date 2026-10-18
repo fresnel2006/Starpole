@@ -91,6 +91,9 @@ class Message {
     this.photo,
     this.latitude,
     this.longitude,
+    this.reponseTexte,
+    this.reponseAuteurId,
+    this.modifie = false,
   });
 
   final String id;
@@ -105,7 +108,15 @@ class Message {
   final double? latitude;
   final double? longitude;
 
+  /// Le message auquel celui-ci répond (texte cité et auteur), s'il y en a un.
+  final String? reponseTexte;
+  final String? reponseAuteurId;
+
+  /// Vrai si l'auteur a modifié le message après l'envoi.
+  final bool modifie;
+
   bool get aUnePosition => latitude != null && longitude != null;
+  bool get estUneReponse => reponseTexte != null;
 
   factory Message.depuisDonnees(String id, Map<String, dynamic> d) {
     final date = d['creeLe'];
@@ -119,6 +130,9 @@ class Message {
       photo: (photo == null || photo.isEmpty) ? null : base64Decode(photo),
       latitude: (d['latitude'] as num?)?.toDouble(),
       longitude: (d['longitude'] as num?)?.toDouble(),
+      reponseTexte: d['reponseTexte'] as String?,
+      reponseAuteurId: d['reponseAuteurId'] as String?,
+      modifie: d['modifie'] == true,
     );
   }
 }

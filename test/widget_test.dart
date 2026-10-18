@@ -21,6 +21,7 @@ import 'package:projet_starpole/noyau/service_auth.dart';
 import 'package:projet_starpole/noyau/service_carnet.dart';
 import 'package:projet_starpole/noyau/service_localisation.dart';
 import 'package:projet_starpole/noyau/service_messagerie.dart';
+import 'package:projet_starpole/noyau/service_notifications.dart';
 import 'package:projet_starpole/noyau/service_photo.dart';
 import 'package:projet_starpole/partage/composants/case_a_cocher.dart';
 import 'package:projet_starpole/partage/composants/champ_texte.dart';
@@ -406,8 +407,11 @@ class FausseMessagerie implements ServiceMessagerie {
     Uint8List? photo,
     double? latitude,
     double? longitude,
+    String? reponseTexte,
+    String? reponseAuteurId,
   }) async {
     actions.add('message:$conversationId:$texte');
+    if (reponseTexte != null) actions.add('reponse:$reponseTexte');
     if (photo != null) actions.add('photo:$conversationId');
     if (latitude != null) actions.add('position:$conversationId:$latitude');
     (_messages[conversationId] ??= []).add(
@@ -419,7 +423,30 @@ class FausseMessagerie implements ServiceMessagerie {
         photo: photo,
         latitude: latitude,
         longitude: longitude,
+        reponseTexte: reponseTexte,
+        reponseAuteurId: reponseAuteurId,
       ),
+    );
+    _changement.add(null);
+  }
+
+  @override
+  Future<void> modifierMessage(
+    String conversationId,
+    String messageId,
+    String texte, {
+    required bool dernier,
+  }) async {
+    actions.add('modifier:$messageId:$texte');
+    final liste = _messages[conversationId]!;
+    final i = liste.indexWhere((m) => m.id == messageId);
+    final ancien = liste[i];
+    liste[i] = Message(
+      id: ancien.id,
+      texte: texte,
+      auteurId: ancien.auteurId,
+      creeLe: ancien.creeLe,
+      modifie: true,
     );
     _changement.add(null);
   }
@@ -429,6 +456,26 @@ class FausseMessagerie implements ServiceMessagerie {
     actions.add('lu:$conversationId');
     if (_nonLus.remove(conversationId)) _changement.add(null);
   }
+
+  /// Ce que l'autre personne a fait : date de lecture et présence (le test les
+  /// change, puis appelle [changer]).
+  DateTime? luParLui;
+  DateTime? vuLe;
+  int signauxDePresence = 0;
+
+  void changer() => _changement.add(null);
+
+  @override
+  Future<void> signalerPresence() async {
+    signauxDePresence++;
+  }
+
+  @override
+  Stream<DateTime?> luParAutre(String conversationId, String autreId) =>
+      _flux(() => luParLui);
+
+  @override
+  Stream<DateTime?> presenceDe(String autreId) => _flux(() => vuLe);
 
   @override
   Future<Contact?> profilDe(String id) async {
@@ -608,6 +655,7 @@ Future<void> allerALInscription(
   ServiceMessagerie? messagerie,
   ServiceCarnet? carnet,
   ServiceAppel? appels,
+  ServiceNotifications? notifications,
   Size taille = const Size(390, 844),
   double echelleTexte = 1,
 }) async {
@@ -626,6 +674,7 @@ Future<void> allerALInscription(
       carnet: carnet ?? FausseCarnet(),
       appels: appels ?? FausseAppel(),
       constructeurCarte: carteDeTest,
+      notifications: notifications ?? FausseNotifications(),
       photos: photos,
       localisation: localisation ?? FausseLocalisation(),
     ),
@@ -824,6 +873,17 @@ void main() {
     final auth = FausseAuth()..googleReussi = false;
     await allerALInscription(tester, auth);
 
+    // Sans avoir accepté les conditions, Google ne démarre pas : la case vibre.
+    await tester.tap(find.text('Continuer avec Google'));
+    await tester.pump();
+    expect(
+      tester.state<CaseACocherState>(find.byType(CaseACocher)).enErreur,
+      isTrue,
+    );
+    expect(auth.appels, isEmpty);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(CaseACocher));
+
     // L'utilisateur ferme la fenêtre Google : rien ne se passe.
     await tester.tap(find.text('Continuer avec Google'));
     await tester.pumpAndSettle();
@@ -843,6 +903,7 @@ void main() {
     final auth = FausseAuth(erreur: "Google n'est pas encore configuré.");
     await allerALInscription(tester, auth);
 
+    await tester.tap(find.byType(CaseACocher)); // conditions acceptées
     await tester.tap(find.text('Continuer avec Google'));
     await tester.pumpAndSettle();
     expect(find.text("Google n'est pas encore configuré."), findsOneWidget);
@@ -978,7 +1039,12 @@ void main() {
     tester,
   ) async {
     final alertes = FausseAlertes(initiales: alertesDeDepart());
-    await allerALInscription(tester, FausseAuth(), alertes: alertes);
+    await allerALInscription(
+      tester,
+      FausseAuth(),
+      alertes: alertes,
+      photos: FausseSelectionPhoto(),
+    );
     await sInscrire(tester);
 
     await tester.tap(find.byIcon(Icons.add));
@@ -996,6 +1062,10 @@ void main() {
       'Des vetements pour enfants',
     );
     await tester.ensureVisible(find.text("Publier l'alerte"));
+    // La photo est obligatoire : on en choisit une.
+    await tester.ensureVisible(find.text('Appuyer pour prendre une photo'));
+    await tester.tap(find.text('Appuyer pour prendre une photo'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text("Publier l'alerte"));
     await tester.pumpAndSettle();
 
@@ -1052,6 +1122,45 @@ void main() {
     await tester.pumpAndSettle();
   });
 
+  testWidgets('Poster une alerte : sans photo, on ne peut pas publier', (
+    tester,
+  ) async {
+    final alertes = FausseAlertes(initiales: alertesDeDepart());
+    await allerALInscription(
+      tester,
+      FausseAuth(),
+      alertes: alertes,
+      photos: FausseSelectionPhoto(),
+    );
+    await sInscrire(tester);
+    await tester.tap(find.byIcon(Icons.add));
+    await tester.pumpAndSettle();
+
+    // Titre et description remplis, mais pas de photo : la zone photo vibre.
+    await tester.enterText(find.byType(TextField).at(0), 'Un titre');
+    await tester.enterText(find.byType(TextField).at(1), 'Une description');
+    await tester.ensureVisible(find.text("Publier l'alerte"));
+    await tester.tap(find.text("Publier l'alerte"));
+    await tester.pump();
+    final vibrants = find.byType(Vibrant);
+    expect(tester.state<VibrantState>(vibrants.at(0)).enErreur, isFalse);
+    expect(tester.state<VibrantState>(vibrants.at(1)).enErreur, isFalse);
+    expect(tester.state<VibrantState>(vibrants.at(2)).enErreur, isTrue);
+    expect(find.byType(SnackBar), findsNothing);
+    expect(alertes.actions, isEmpty);
+    await tester.pumpAndSettle();
+
+    // Avec une photo, l'alerte est publiée.
+    await tester.ensureVisible(find.text('Appuyer pour prendre une photo'));
+    await tester.tap(find.text('Appuyer pour prendre une photo'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text("Publier l'alerte"));
+    await tester.tap(find.text("Publier l'alerte"));
+    await tester.pumpAndSettle();
+    expect(alertes.actions, hasLength(1));
+    expect(alertes.publiees.single.photo, isNotNull);
+  });
+
   testWidgets('Poster une alerte : sans position, on explique pourquoi', (
     tester,
   ) async {
@@ -1064,6 +1173,7 @@ void main() {
       FausseAuth(),
       alertes: alertes,
       localisation: position,
+      photos: FausseSelectionPhoto(),
     );
     await sInscrire(tester);
 
@@ -1074,6 +1184,9 @@ void main() {
       find.byType(TextField).at(1),
       'Une personne a besoin',
     );
+    await tester.ensureVisible(find.text('Appuyer pour prendre une photo'));
+    await tester.tap(find.text('Appuyer pour prendre une photo'));
+    await tester.pumpAndSettle();
     await tester.ensureVisible(find.text("Publier l'alerte"));
     await tester.tap(find.text("Publier l'alerte"));
     await tester.pumpAndSettle();
@@ -1745,6 +1858,113 @@ void main() {
     expect(find.text('Connexion'), findsOneWidget);
   });
 
+  testWidgets('Notifications : activées à la connexion, retirées à la sortie', (
+    tester,
+  ) async {
+    final notifications = FausseNotifications();
+    await allerALInscription(
+      tester,
+      FausseAuth(),
+      notifications: notifications,
+    );
+    await sInscrire(tester);
+    expect(notifications.actions, ['activer']);
+
+    await tester.tap(find.text('Profil'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.settings));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Se déconnecter'));
+    await tester.tap(find.text('Se déconnecter'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Se déconnecter').last);
+    await tester.pumpAndSettle();
+    expect(notifications.actions, ['activer', 'desactiver']);
+  });
+
+  testWidgets('Notifications : un message reçu, appli ouverte puis touché', (
+    tester,
+  ) async {
+    final notifications = FausseNotifications();
+    await allerALInscription(
+      tester,
+      FausseAuth(),
+      messagerie: FausseMessagerie(),
+      notifications: notifications,
+    );
+    await sInscrire(tester);
+
+    // Un message arrive pendant que l'appli est ouverte : un bandeau l'annonce.
+    notifications.recues.add(
+      const NotificationRecue(
+        titre: 'Oncle Kouassi',
+        texte: 'Tu es là ?',
+        type: 'message',
+        conversationId: 'c_kouassi',
+        expediteurId: 'kouassi',
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(find.text('Oncle Kouassi : Tu es là ?'), findsOneWidget);
+
+    // « Ouvrir » ouvre la conversation avec lui.
+    await tester.tap(find.text('Ouvrir'));
+    await tester.pumpAndSettle();
+    expect(find.text('Dites bonjour à Oncle Kouassi.'), findsOneWidget);
+
+    // Dans cette conversation, un autre message de lui n'est pas annoncé.
+    notifications.recues.add(
+      const NotificationRecue(
+        titre: 'Oncle Kouassi',
+        texte: 'Réponds-moi',
+        type: 'message',
+        conversationId: 'c_kouassi',
+        expediteurId: 'kouassi',
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+    expect(find.textContaining('Réponds-moi'), findsNothing);
+
+    // Une notification d'un autre type est ignorée.
+    notifications.recues.add(
+      const NotificationRecue(titre: 'Alerte', texte: 'x', type: 'alerte'),
+    );
+    await tester.pump();
+    expect(find.text('Alerte : x'), findsNothing);
+  });
+
+  testWidgets(
+    'Notifications : toucher une notification ouvre la conversation',
+    (tester) async {
+      final notifications = FausseNotifications()
+        ..initiale = const NotificationRecue(
+          titre: 'Mariam',
+          texte: 'Bonjour',
+          type: 'message',
+          conversationId: 'c_mariam',
+          expediteurId: 'mariam',
+        );
+      await allerALInscription(
+        tester,
+        FausseAuth(),
+        notifications: notifications,
+      );
+      // Inscription à la main : la conversation s'ouvre par-dessus l'accueil.
+      await remplirInscription(tester);
+      await tester.tap(find.byType(CaseACocher));
+      await tester.tap(find.text("S'inscrire").last);
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), '1234');
+      await tester.pumpAndSettle();
+
+      // L'appli a été ouverte par la notification : la conversation s'ouvre.
+      expect(find.text('Dites bonjour à Mariam.'), findsOneWidget);
+    },
+  );
+
   testWidgets("Inscription : les conditions et la confidentialité s'ouvrent", (
     tester,
   ) async {
@@ -1972,6 +2192,83 @@ void main() {
     expect(find.text('Dites bonjour à Oncle Kouassi.'), findsOneWidget);
   });
 
+  testWidgets('Appel : la tonalité joue tant que ça sonne, puis s\'arrête', (
+    tester,
+  ) async {
+    final sons = <String>[];
+    const canal = MethodChannel('starpole/sonnerie');
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(canal, (
+      appel,
+    ) async {
+      sons.add('${appel.method}:${appel.arguments}');
+      return null;
+    });
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        canal,
+        null,
+      ),
+    );
+    final appels = FausseAppel();
+    await allerALInscription(
+      tester,
+      FausseAuth(),
+      messagerie: FausseMessagerie(contacts: [kouassi]),
+      appels: appels,
+    );
+    await sInscrire(tester);
+    await tester.tap(find.text('Message'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.forum));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Oncle Kouassi'));
+    await tester.pumpAndSettle();
+
+    // Appel vocal : la tonalité démarre dans l'écouteur.
+    await tester.tap(find.byIcon(Icons.phone_in_talk_outlined));
+    await tester.pumpAndSettle();
+    expect(sons, ['demarrer:{hautParleur: false}']);
+
+    // L'autre décroche : la tonalité s'arrête.
+    appels.derniere.etatInterne.value = EtatAppel.connexion;
+    await tester.pump();
+    expect(sons.last, startsWith('arreter'));
+
+    await tester.tap(find.byIcon(Icons.call_end));
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('Inscription : la flèche retour ne laisse pas un écran noir', (
+    tester,
+  ) async {
+    final auth = FausseAuth();
+    await allerALInscription(tester, auth);
+    await sInscrire(tester);
+
+    // Déconnexion : la connexion devient le premier écran, puis « S'inscrire »
+    // la remplace par l'inscription, qui n'a alors rien derrière elle.
+    await tester.tap(find.text('Profil'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.settings));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Se déconnecter'));
+    await tester.tap(find.text('Se déconnecter'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Se déconnecter').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Connexion'), findsOneWidget);
+    await tester.ensureVisible(find.text("S'inscrire").last);
+    await tester.tap(find.text("S'inscrire").last);
+    await tester.pumpAndSettle();
+    expect(find.text('Créer un compte'), findsOneWidget);
+
+    // La flèche ramène à la connexion (et non à un écran noir).
+    await tester.tap(find.byIcon(Icons.chevron_left));
+    await tester.pumpAndSettle();
+    expect(find.text('Connexion'), findsOneWidget);
+    expect(find.text('Créer un compte'), findsNothing);
+  });
+
   testWidgets('Appel : un appel entrant, répondre puis refuser un autre', (
     tester,
   ) async {
@@ -2095,6 +2392,157 @@ void main() {
     await tester.tap(find.byIcon(Icons.chevron_left));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('non-lu')), findsNothing);
+  });
+
+  testWidgets(
+    'Messagerie : glisser un message vers la droite pour y répondre',
+    (tester) async {
+      final messagerie = FausseMessagerie(contacts: [kouassi]);
+      await allerALInscription(tester, FausseAuth(), messagerie: messagerie);
+      await sInscrire(tester);
+      await tester.tap(find.text('Message'));
+      await tester.pumpAndSettle();
+      messagerie.recevoir(kouassi, 'Tu viens demain ?');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Oncle Kouassi'));
+      await tester.pumpAndSettle();
+
+      // Un glissement trop court ne fait rien.
+      await tester.drag(find.text('Tu viens demain ?'), const Offset(20, 0));
+      await tester.pumpAndSettle();
+      expect(find.text('Réponse à Oncle Kouassi'), findsNothing);
+
+      // Glissé vers la droite : le bandeau de réponse apparaît.
+      await tester.drag(find.text('Tu viens demain ?'), const Offset(120, 0));
+      await tester.pumpAndSettle();
+      expect(find.text('Réponse à Oncle Kouassi'), findsOneWidget);
+
+      await tester.enterText(find.byType(TextField), 'Oui, à 8 h');
+      await tester.tap(find.byIcon(Icons.send));
+      await tester.pumpAndSettle();
+      expect(messagerie.actions, contains('reponse:Tu viens demain ?'));
+      expect(find.text('Réponse à Oncle Kouassi'), findsNothing);
+      // La citation est affichée dans la bulle (en plus du message d'origine).
+      expect(find.text('Tu viens demain ?'), findsNWidgets(2));
+      expect(find.text('Oncle Kouassi'), findsWidgets);
+    },
+  );
+
+  testWidgets('Messagerie : coches envoyé, reçu puis vu', (tester) async {
+    final messagerie = FausseMessagerie(contacts: [kouassi]);
+    await allerALInscription(tester, FausseAuth(), messagerie: messagerie);
+    await sInscrire(tester);
+    expect(messagerie.signauxDePresence, greaterThan(0));
+    await tester.tap(find.text('Message'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.forum));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Oncle Kouassi'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Bonjour');
+    await tester.tap(find.byIcon(Icons.send));
+    await tester.pumpAndSettle();
+
+    // Il n'est pas connecté : une coche (envoyé).
+    expect(find.byIcon(Icons.check), findsOneWidget);
+
+    // Il est connecté : deux coches (reçu).
+    messagerie.vuLe = DateTime.now();
+    messagerie.changer();
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.check), findsNWidgets(2));
+
+    // Il a lu la conversation : trois coches (vu).
+    messagerie.luParLui = DateTime.now().add(const Duration(seconds: 1));
+    messagerie.changer();
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.check), findsNWidgets(3));
+  });
+
+  testWidgets('Messagerie : menu des trois points, recherche et médias', (
+    tester,
+  ) async {
+    final messagerie = FausseMessagerie(contacts: [kouassi]);
+    await allerALInscription(tester, FausseAuth(), messagerie: messagerie);
+    await sInscrire(tester);
+    await tester.tap(find.text('Message'));
+    await tester.pumpAndSettle();
+    messagerie.recevoir(kouassi, 'Rendez-vous au marché');
+    messagerie.recevoir(kouassi, 'Apporte le sac');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Oncle Kouassi'));
+    await tester.pumpAndSettle();
+
+    // Recherche : seuls les messages qui contiennent le mot restent.
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rechercher un message'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'marché');
+    await tester.pumpAndSettle();
+    expect(find.text('Rendez-vous au marché'), findsOneWidget);
+    expect(find.text('Apporte le sac'), findsNothing);
+    await tester.enterText(find.byType(TextField).first, 'zzz');
+    await tester.pumpAndSettle();
+    expect(find.text('Aucun message.'), findsOneWidget);
+
+    // La flèche ferme la recherche et ramène tous les messages.
+    await tester.tap(find.byIcon(Icons.chevron_left));
+    await tester.pumpAndSettle();
+    expect(find.text('Apporte le sac'), findsOneWidget);
+
+    // Photos et positions : rien n'a encore été partagé.
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Photos et positions').last);
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Aucune photo ni position partagée pour le moment.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('Messagerie : modifier un de mes messages', (tester) async {
+    final messagerie = FausseMessagerie(contacts: [kouassi]);
+    await allerALInscription(tester, FausseAuth(), messagerie: messagerie);
+    await sInscrire(tester);
+    await tester.tap(find.text('Message'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.forum));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Oncle Kouassi'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Bonjour Kouasi');
+    await tester.tap(find.byIcon(Icons.send));
+    await tester.pumpAndSettle();
+
+    // Appui long : le menu propose de répondre et de modifier.
+    await tester.longPress(find.text('Bonjour Kouasi'));
+    await tester.pumpAndSettle();
+    expect(find.text('Répondre'), findsOneWidget);
+    await tester.tap(find.text('Modifier'));
+    await tester.pumpAndSettle();
+    expect(find.text('Modification du message'), findsOneWidget);
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).controller!.text,
+      'Bonjour Kouasi',
+    );
+
+    await tester.enterText(find.byType(TextField), 'Bonjour Kouassi');
+    await tester.tap(find.byIcon(Icons.send));
+    await tester.pumpAndSettle();
+    expect(messagerie.actions, contains('modifier:m0:Bonjour Kouassi'));
+    expect(find.text('Bonjour Kouassi'), findsOneWidget);
+    expect(find.textContaining('Modifié'), findsOneWidget);
+    expect(find.text('Modification du message'), findsNothing);
+
+    // Le message de l'autre personne ne se modifie pas.
+    messagerie.recevoir(kouassi, 'Salut');
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Salut'));
+    await tester.pumpAndSettle();
+    expect(find.text('Répondre'), findsOneWidget);
+    expect(find.text('Modifier'), findsNothing);
   });
 
   testWidgets('Messagerie : le compte est rendu recherchable au démarrage', (
@@ -2236,6 +2684,32 @@ Widget carteDeTest(BuildContext context, DonneesCarte donnees) {
         ),
     ],
   );
+}
+
+/// Fausses notifications : elles notent ce qui est demandé et laissent le test
+/// « recevoir » une notification.
+class FausseNotifications implements ServiceNotifications {
+  final List<String> actions = [];
+  final StreamController<NotificationRecue> recues =
+      StreamController<NotificationRecue>.broadcast();
+  final StreamController<NotificationRecue> touchees =
+      StreamController<NotificationRecue>.broadcast();
+  NotificationRecue? initiale;
+
+  @override
+  Future<void> activer() async => actions.add('activer');
+
+  @override
+  Future<void> desactiver() async => actions.add('desactiver');
+
+  @override
+  Stream<NotificationRecue> get auPremierPlan => recues.stream;
+
+  @override
+  Stream<NotificationRecue> get ouvertures => touchees.stream;
+
+  @override
+  Future<NotificationRecue?> ouvertureInitiale() async => initiale;
 }
 
 /// Faux service d'appel : il note ce qui est demandé et laisse le test

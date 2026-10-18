@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../application/couleurs.dart';
 import '../../noyau/appel.dart';
 import '../../noyau/service_appel.dart';
+import '../../noyau/sonnerie.dart';
 import '../../partage/composants/avatar_utilisateur.dart';
 import '../../partage/styles.dart';
 
@@ -34,6 +35,9 @@ class _EcranAppelState extends State<EcranAppel> {
   int _secondes = 0;
   bool _fermeture = false;
 
+  /// Vrai pendant que la tonalité « tuuut... tuuut... » joue.
+  bool _tonalite = false;
+
   SessionAppel get _session => widget.session;
 
   @override
@@ -47,6 +51,7 @@ class _EcranAppelState extends State<EcranAppel> {
   void dispose() {
     _session.etat.removeListener(_surChangement);
     _chrono?.cancel();
+    if (_tonalite) SonnerieAppel.arreter();
     _session.raccrocher();
     _session.dispose();
     super.dispose();
@@ -54,6 +59,15 @@ class _EcranAppelState extends State<EcranAppel> {
 
   void _surChangement() {
     final etat = _session.etat.value;
+    // Tant que ça sonne chez l'autre personne, l'appelant entend la tonalité ;
+    // elle s'arrête dès qu'on décroche, qu'on refuse ou qu'on raccroche.
+    if (etat == EtatAppel.sonne && !_tonalite) {
+      _tonalite = true;
+      SonnerieAppel.demarrer(hautParleur: _session.video);
+    } else if (etat != EtatAppel.sonne && _tonalite) {
+      _tonalite = false;
+      SonnerieAppel.arreter();
+    }
     if (etat == EtatAppel.enCours && _chrono == null) {
       _chrono = Timer.periodic(const Duration(seconds: 1), (_) {
         if (mounted) setState(() => _secondes++);

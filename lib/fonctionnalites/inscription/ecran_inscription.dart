@@ -110,8 +110,27 @@ class _EcranInscriptionState extends State<EcranInscription> {
     }
   }
 
+  /// La flèche retour : revient à l'écran d'avant, ou à la connexion s'il n'y
+  /// en a pas (sinon l'écran deviendrait noir).
+  void _retour() {
+    final navigateur = Navigator.of(context);
+    if (navigateur.canPop()) {
+      navigateur.pop();
+    } else {
+      navigateur.pushReplacement(
+        MaterialPageRoute<void>(builder: (_) => const EcranConnexion()),
+      );
+    }
+  }
+
   /// Connexion avec Google : un seul bouton pour se connecter ou s'inscrire.
+  /// Comme pour l'inscription par e-mail, il faut d'abord accepter les
+  /// conditions d'utilisation et la politique de confidentialité.
   Future<void> _avecGoogle() async {
+    if (!_conditionsAcceptees) {
+      _cleConditions.currentState?.signalerErreur();
+      return;
+    }
     final auth = context.read<ServiceAuth>();
     setState(() => _enCours = true);
     try {
@@ -184,7 +203,7 @@ class _EcranInscriptionState extends State<EcranInscription> {
                     button: true,
                     label: 'Retour',
                     child: GestureDetector(
-                      onTap: () => Navigator.of(context).pop(),
+                      onTap: _retour,
                       child: Container(
                         width: 40,
                         height: 40,
