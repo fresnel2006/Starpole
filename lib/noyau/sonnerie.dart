@@ -18,6 +18,25 @@ class SonnerieAppel {
     }
   }
 
+  /// Fait sonner le téléphone (sa sonnerie habituelle, en boucle) : c'est ce
+  /// que la personne appelée entend.
+  static Future<void> sonner() async {
+    try {
+      await _canal.invokeMethod<void>('sonner');
+    } catch (_) {
+      // Pas de son possible (par exemple dans un test) : l'appel continue.
+    }
+  }
+
+  /// Coupe la sonnerie de l'appel entrant.
+  static Future<void> couper() async {
+    try {
+      await _canal.invokeMethod<void>('couper');
+    } catch (_) {
+      // Rien à couper.
+    }
+  }
+
   /// Coupe la tonalité.
   static Future<void> arreter() async {
     try {

@@ -88,6 +88,46 @@ class _EcranSuiviAlerteState extends State<EcranSuiviAlerte> {
     }
   }
 
+  /// Demande confirmation avant « Stopper », en disant ce qui se passe.
+  Future<bool?> _confirmerArret(bool estAuteur) {
+    return showDialog<bool>(
+      context: context,
+      builder: (contexte) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Text(
+          estAuteur ? "Stopper l'alerte ?" : "Arrêter d'aider ?",
+          style: Styles.gras(17, Colors.black),
+        ),
+        content: Text(
+          estAuteur
+              ? "Votre alerte sera fermée pour tout le monde."
+              : "Seule votre aide s'arrête. L'alerte reste ouverte : "
+                    "un autre voisin pourra la prendre en charge.",
+          style: Styles.gras(
+            13,
+            Couleurs.grisTexte,
+            hauteur: 1.5,
+            poids: FontWeight.w500,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(contexte).pop(false),
+            child: Text('Annuler', style: Styles.gras(14, Couleurs.grisTexte)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(contexte).pop(true),
+            child: Text(
+              estAuteur ? 'Stopper' : "Arrêter d'aider",
+              style: Styles.gras(14, Couleurs.rouge),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// « Terminé » et « Stopper » : on clôture l'alerte, puis on ouvre la note
   /// de l'autre personne (l'aidant si je suis l'auteur, l'auteur si j'aide).
   ///
@@ -97,9 +137,25 @@ class _EcranSuiviAlerteState extends State<EcranSuiviAlerte> {
     final service = context.read<ServiceAlertes>();
     final estAuteur = alerte.auteurId == service.utilisateurId;
 
+    // « Stopper » : on explique d'abord ce que ça change, et pour qui.
+    if (arret) {
+      final confirme = await _confirmerArret(estAuteur);
+      if (confirme != true || !mounted) return;
+    }
+
     setState(() => _enCours = true);
     try {
       if (arret && !estAuteur) {
+        // L'auteur voit dans la timeline que l'aidant s'est retiré. Le message
+        // doit partir avant l'arrêt : ensuite, il n'aide plus.
+        try {
+          await service.envoyerProgression(
+            alerte.id,
+            "J'arrête d'aider. L'alerte reste ouverte pour les autres.",
+          );
+        } on ErreurAlerte {
+          // Pas grave : l'arrêt, lui, doit se faire.
+        }
         await service.arreter(alerte.id);
       } else {
         await service.terminer(alerte.id);
@@ -191,8 +247,8 @@ class _EcranSuiviAlerteState extends State<EcranSuiviAlerte> {
             final moi = service.utilisateurId;
             final estAuteur = alerte.auteurId == moi;
             final estAidant = alerte.aidantId != null && alerte.aidantId == moi;
-            // Écrire, terminer ou arrêter : seulement l'auteur et la personne
-            // qui aide, tant que l'alerte est en cours.
+            // Écrire ou arrêter : l'auteur et la personne qui aide, tant que
+            // l'alerte est en cours. Seul l'auteur peut la terminer.
             final participant =
                 alerte.statut == StatutAlerte.enCours &&
                 (estAuteur || estAidant);
@@ -374,6 +430,7 @@ class _EcranSuiviAlerteState extends State<EcranSuiviAlerte> {
                     envoiEnCours: _envoiEnCours,
                     enCours: _enCours,
                     envoyer: () => _envoyerMessage(alerte),
+                    peutTerminer: estAuteur,
                     termine: () => _cloturer(alerte, arret: false),
                     stoppe: () => _cloturer(alerte, arret: true),
                   ),
@@ -458,6 +515,7 @@ class _BasDePage extends StatelessWidget {
     required this.envoiEnCours,
     required this.enCours,
     required this.envoyer,
+    required this.peutTerminer,
     required this.termine,
     required this.stoppe,
   });
@@ -467,6 +525,9 @@ class _BasDePage extends StatelessWidget {
   final bool envoiEnCours;
   final bool enCours;
   final VoidCallback envoyer;
+
+  /// Vrai pour l'auteur de l'alerte : lui seul voit le bouton « Terminé ».
+  final bool peutTerminer;
   final VoidCallback termine;
   final VoidCallback stoppe;
 
@@ -560,18 +621,20 @@ class _BasDePage extends StatelessWidget {
           const SizedBox(height: 10),
           Row(
             children: [
-              GestureDetector(
-                onTap: enCours ? null : termine,
-                child: const Puce(
-                  texte: 'Terminé',
-                  fond: Couleurs.rouge,
-                  couleurTexte: Colors.white,
-                  taille: 11,
-                  ombre: true,
-                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+              if (peutTerminer) ...[
+                GestureDetector(
+                  onTap: enCours ? null : termine,
+                  child: const Puce(
+                    texte: 'Terminé',
+                    fond: Couleurs.rouge,
+                    couleurTexte: Colors.white,
+                    taille: 11,
+                    ombre: true,
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 14),
+                const SizedBox(width: 14),
+              ],
               GestureDetector(
                 onTap: enCours ? null : stoppe,
                 child: const Puce(

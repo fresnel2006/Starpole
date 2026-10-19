@@ -10,8 +10,10 @@ import '../../partage/composants/avatar_utilisateur.dart';
 import '../../partage/composants/bouton_rouge.dart';
 import '../../partage/composants/champ_recherche.dart';
 import '../../partage/composants/champ_texte.dart';
+import '../../partage/composants/menu_trois_points.dart';
 import '../../partage/composants/puce.dart';
 import '../../partage/styles.dart';
+import '../parametres/ecran_parametres.dart';
 import 'ecran_contacts.dart';
 import 'ecran_conversation.dart';
 
@@ -86,6 +88,31 @@ class _EcranMessagerieState extends State<EcranMessagerie> {
     );
   }
 
+  /// Marque comme lues toutes mes conversations qui ont un message non lu.
+  Future<void> _toutMarquerLu() async {
+    final service = context.read<ServiceMessagerie>();
+    final conversations = await service.conversations().first;
+    for (final conversation in conversations.where((c) => c.nonLu)) {
+      await service.marquerLu(conversation.id);
+    }
+  }
+
+  /// Ce qui est choisi dans le menu des trois points.
+  void _choisirDansMenu(String choix) {
+    switch (choix) {
+      case 'nouvelle':
+        _nouvelleConversation();
+      case 'lu':
+        _toutMarquerLu();
+      case 'parametres':
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(builder: (_) => const EcranParametres()),
+        );
+      case 'deconnexion':
+        seDeconnecter(context);
+    }
+  }
+
   void _nouvelleConversation() {
     Navigator.of(context)
         .push(MaterialPageRoute<void>(builder: (_) => const EcranContacts()));
@@ -124,6 +151,33 @@ class _EcranMessagerieState extends State<EcranMessagerie> {
                             couleurTexte: Couleurs.rouge,
                             taille: 11,
                             ombre: true,
+                          ),
+                          const SizedBox(width: 6),
+                          MenuTroisPoints(
+                            auChoix: _choisirDansMenu,
+                            entrees: const [
+                              EntreeMenu(
+                                valeur: 'nouvelle',
+                                icone: Icons.add_comment_outlined,
+                                texte: 'Nouvelle conversation',
+                              ),
+                              EntreeMenu(
+                                valeur: 'lu',
+                                icone: Icons.mark_chat_read_outlined,
+                                texte: 'Tout marquer comme lu',
+                              ),
+                              EntreeMenu(
+                                valeur: 'parametres',
+                                icone: Icons.settings_outlined,
+                                texte: 'Paramètres',
+                              ),
+                              EntreeMenu(
+                                valeur: 'deconnexion',
+                                icone: Icons.logout,
+                                texte: 'Déconnexion',
+                                separateurAvant: true,
+                              ),
+                            ],
                           ),
                         ],
                       ),

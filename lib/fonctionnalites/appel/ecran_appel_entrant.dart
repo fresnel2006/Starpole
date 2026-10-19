@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../../application/couleurs.dart';
 import '../../noyau/appel.dart';
 import '../../noyau/service_appel.dart';
+import '../../noyau/sonnerie.dart';
 import '../../partage/composants/avatar_utilisateur.dart';
 import '../../partage/styles.dart';
 import 'ecran_appel.dart';
@@ -36,6 +37,7 @@ class _EcranAppelEntrantState extends State<EcranAppelEntrant> {
     _abonnement = _service.appelsEntrants().listen((appel) {
       if (appel?.id != widget.appel.id) _fermer();
     });
+    SonnerieAppel.sonner();
     _sonner();
     _sonnerie = Timer.periodic(const Duration(seconds: 2), (_) => _sonner());
   }
@@ -44,12 +46,13 @@ class _EcranAppelEntrantState extends State<EcranAppelEntrant> {
   void dispose() {
     _abonnement?.cancel();
     _sonnerie?.cancel();
+    SonnerieAppel.couper();
     super.dispose();
   }
 
-  /// Un signal sonore et une vibration, répétés tant que ça sonne.
+  /// Une vibration, répétée tant que ça sonne (le son est celui de la
+  /// sonnerie du téléphone).
   void _sonner() {
-    SystemSound.play(SystemSoundType.alert);
     HapticFeedback.vibrate();
   }
 
@@ -69,6 +72,7 @@ class _EcranAppelEntrantState extends State<EcranAppelEntrant> {
     if (_enReponse) return;
     setState(() => _enReponse = true);
     _sonnerie?.cancel();
+    SonnerieAppel.couper();
     final messager = ScaffoldMessenger.of(context);
     final navigateur = Navigator.of(context);
     try {

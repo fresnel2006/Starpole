@@ -75,9 +75,8 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys()
                .hasOnly(['aidantId', 'aidantNom', 'accepteLe']) )
         ||
-        // L'auteur ou la personne qui aide marque l'alerte comme résolue.
-        ( (resource.data.auteurId == request.auth.uid
-           || resource.data.aidantId == request.auth.uid)
+        // Seul l'auteur marque l'alerte comme résolue.
+        ( resource.data.auteurId == request.auth.uid
           && request.resource.data.statut == 'resolue'
           && request.resource.data.diff(resource.data).affectedKeys()
                .hasOnly(['statut', 'termineLe']) )

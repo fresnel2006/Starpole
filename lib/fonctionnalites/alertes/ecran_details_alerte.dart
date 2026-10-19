@@ -35,6 +35,14 @@ class _EcranDetailsAlerteState extends State<EcranDetailsAlerte> {
   );
   bool _enCours = false;
 
+  /// Ouvre l'itinéraire jusqu'à l'alerte dans l'appli de cartes du téléphone.
+  Future<void> _ouvrirItineraire(Alerte alerte) async {
+    final ouvert = await ouvrirItineraire(alerte);
+    if (!ouvert && mounted) {
+      _afficherMessage("Impossible d'ouvrir l'itinéraire sur ce téléphone.");
+    }
+  }
+
   void _afficherMessage(String texte) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
@@ -195,7 +203,11 @@ class _EcranDetailsAlerteState extends State<EcranDetailsAlerte> {
                       borderRadius: BorderRadius.circular(12),
                       boxShadow: Styles.ombre,
                     ),
-                    child: PhotoAlerte(photo: alerte.photo, ratio: 2),
+                    child: PhotoAlerte(
+                      photo: alerte.photo,
+                      ratio: 2,
+                      entiere: true,
+                    ),
                   ),
                   const SizedBox(height: 18),
                   Padding(
@@ -233,6 +245,7 @@ class _EcranDetailsAlerteState extends State<EcranDetailsAlerte> {
                     aider: () => _aider(alerte),
                     voirSuivi: () => _ouvrirSuivi(alerte),
                     partager: () => partagerAlerte(alerte),
+                    itineraire: () => _ouvrirItineraire(alerte),
                   ),
                   const SizedBox(height: 22),
                   GestureDetector(
@@ -296,6 +309,7 @@ class _Actions extends StatelessWidget {
     required this.aider,
     required this.voirSuivi,
     required this.partager,
+    required this.itineraire,
   });
 
   final Alerte alerte;
@@ -304,6 +318,7 @@ class _Actions extends StatelessWidget {
   final VoidCallback aider;
   final VoidCallback voirSuivi;
   final VoidCallback partager;
+  final VoidCallback itineraire;
 
   @override
   Widget build(BuildContext context) {
@@ -347,6 +362,17 @@ class _Actions extends StatelessWidget {
     return Column(
       children: [
         principal,
+        // L'itinéraire n'est proposé que si l'alerte a une position.
+        if (alerte.aUnePosition) ...[
+          const SizedBox(height: 14),
+          _BoutonAction(
+            libelle: 'Itinéraire',
+            icone: Icons.directions,
+            fond: Colors.white,
+            couleurTexte: Couleurs.vert,
+            auAppui: itineraire,
+          ),
+        ],
         const SizedBox(height: 14),
         _BoutonAction(
           libelle: 'Partager',

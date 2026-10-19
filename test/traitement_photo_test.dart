@@ -59,6 +59,36 @@ void main() {
     }
   });
 
+  test('Entière : rien n est coupé, la forme est gardée', () async {
+    final resultat = img.decodeJpg(
+      await preparerPhoto(photoVerticale(), FormePhoto.entiere),
+    )!;
+
+    // 300 x 500 reste 300 x 500 : les bandes du haut et du bas sont là.
+    expect(resultat.width, 300);
+    expect(resultat.height, 500);
+    final haut = resultat.getPixel(10, 10);
+    expect(haut.b > 200 && haut.r < 90, isTrue);
+    expect(estRouge(resultat.getPixel(150, 250)), isTrue);
+  });
+
+  test(
+    'Entière : une grande photo est réduite sans changer de forme',
+    () async {
+      final grande = img.Image(width: 3000, height: 2000);
+      img.fill(grande, color: img.ColorRgb8(200, 200, 200));
+      final resultat = img.decodeJpg(
+        await preparerPhoto(
+          Uint8List.fromList(img.encodePng(grande)),
+          FormePhoto.entiere,
+        ),
+      )!;
+
+      expect(resultat.width, FormePhoto.entiere.largeurMax);
+      expect(resultat.height, FormePhoto.entiere.largeurMax * 2 ~/ 3);
+    },
+  );
+
   test('Carré : coupe en carré et garde le centre au centre', () async {
     final resultat = img.decodeJpg(
       await preparerPhoto(photoVerticale(), FormePhoto.carre),

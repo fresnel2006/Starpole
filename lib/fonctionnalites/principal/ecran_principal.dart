@@ -33,7 +33,6 @@ class _EcranPrincipalState extends State<EcranPrincipal>
   int _index = 0;
   Timer? _presence;
   StreamSubscription<AppelEntrant?>? _abonAppels;
-  StreamSubscription<NotificationRecue>? _abonNotifications;
   StreamSubscription<NotificationRecue>? _abonOuvertures;
   bool _appelAffiche = false;
 
@@ -50,11 +49,10 @@ class _EcranPrincipalState extends State<EcranPrincipal>
     // les comptes créés avant l'ajout de contacts).
     context.read<ServiceAuth>().assurerRecherchable();
 
-    // Notifications : autorisation, enregistrement de ce téléphone, et réaction
-    // aux messages reçus (appli ouverte) ou aux notifications touchées.
+    // Notifications du téléphone : autorisation, enregistrement de ce
+    // téléphone, et ouverture de la conversation quand on en touche une.
     final notifications = context.read<ServiceNotifications>();
     notifications.activer();
-    _abonNotifications = notifications.auPremierPlan.listen(_surNotification);
     _abonOuvertures = notifications.ouvertures.listen(_ouvrirDepuis);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       // L'appli a été ouverte en touchant une notification (elle était fermée).
@@ -89,37 +87,9 @@ class _EcranPrincipalState extends State<EcranPrincipal>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _presence?.cancel();
-    _abonNotifications?.cancel();
     _abonOuvertures?.cancel();
     _abonAppels?.cancel();
     super.dispose();
-  }
-
-  /// Un message arrive pendant que l'appli est ouverte : un bandeau l'annonce,
-  /// sauf si on est déjà en train de lire cette conversation.
-  void _surNotification(NotificationRecue notification) {
-    if (!mounted || notification.type != 'message') return;
-    if (notification.conversationId == conversationAffichee.value) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          // Flottante, au-dessus de la barre de navigation.
-          behavior: SnackBarBehavior.floating,
-          margin: const EdgeInsets.fromLTRB(16, 0, 16, 100),
-          content: Text(
-            notification.texte.isEmpty
-                ? notification.titre
-                : '${notification.titre} : ${notification.texte}',
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-          action: SnackBarAction(
-            label: 'Ouvrir',
-            onPressed: () => _ouvrirDepuis(notification),
-          ),
-        ),
-      );
   }
 
   /// Ouvre la conversation d'une notification de message.

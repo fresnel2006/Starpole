@@ -56,7 +56,7 @@ class _EcranPosterAlerteState extends State<EcranPosterAlerte> {
   Future<void> _choisirPhoto() async {
     try {
       final octets = await context.read<ServicePhoto>().choisir(
-        forme: FormePhoto.paysage,
+        forme: FormePhoto.entiere,
       );
       if (octets != null && mounted) setState(() => _photo = octets);
     } on ErreurPhoto catch (e) {
@@ -667,7 +667,8 @@ class _CartePosition extends StatelessWidget {
 }
 
 /// « Ajouter une photo » : une zone en pointillés, qui devient l'aperçu de la
-/// photo telle qu'elle sera publiée (coupée en 2 pour 1 autour de son centre).
+/// photo. La photo est gardée entière ; l'aperçu montre le cadrage 2 pour 1
+/// des cartes de la liste, et les détails de l'alerte la montrent en entier.
 class _CartePhoto extends StatelessWidget {
   const _CartePhoto({
     required this.photo,

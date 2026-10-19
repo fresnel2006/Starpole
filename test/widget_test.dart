@@ -4,15 +4,18 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
+import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:projet_starpole/fonctionnalites/ouverture/ecran_ouverture.dart';
 import 'package:projet_starpole/application/application.dart';
 import 'package:projet_starpole/application/couleurs.dart';
 import 'package:projet_starpole/noyau/alerte.dart';
 import 'package:projet_starpole/partage/composants/carte_3d.dart';
 import 'package:projet_starpole/noyau/appel.dart';
+import 'package:projet_starpole/noyau/invitation.dart';
 import 'package:projet_starpole/noyau/messagerie.dart';
 import 'package:projet_starpole/noyau/normalisation.dart';
 import 'package:projet_starpole/noyau/service_alertes.dart';
@@ -677,6 +680,7 @@ Future<void> allerALInscription(
       notifications: notifications ?? FausseNotifications(),
       photos: photos,
       localisation: localisation ?? FausseLocalisation(),
+      animationOuverture: false,
     ),
   );
   // Sur un petit écran, la page défile : on amène chaque bouton à l'écran.
@@ -997,7 +1001,21 @@ void main() {
     expect(find.text('Timeline'), findsOneWidget);
     await tester.tap(find.text('Stopper'));
     await tester.pumpAndSettle();
-    expect(alertes.actions, ['accepter:a1', 'arreter:a1']);
+    // On explique que seule mon aide s'arrête ; « Annuler » ne change rien.
+    expect(find.text("Arrêter d'aider ?"), findsOneWidget);
+    expect(find.textContaining("Seule votre aide s'arrête"), findsOneWidget);
+    await tester.tap(find.text('Annuler'));
+    await tester.pumpAndSettle();
+    expect(alertes.actions, ['accepter:a1']);
+    await tester.tap(find.text('Stopper'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text("Arrêter d'aider"));
+    await tester.pumpAndSettle();
+    expect(alertes.actions, [
+      'accepter:a1',
+      "progression:a1:J'arrête d'aider. L'alerte reste ouverte pour les autres.",
+      'arreter:a1',
+    ]);
     expect(find.text("Noter l'auteur"), findsOneWidget);
     expect(find.text('Kouadio Eliezer'), findsOneWidget);
     expect(find.text('Alerte en cours'), findsNothing);
@@ -1011,7 +1029,111 @@ void main() {
     expect(find.text('2 Alertes'), findsOneWidget);
   });
 
-  testWidgets("Terminer : l'alerte est résolue et la note s'ouvre", (
+  testWidgets('Accueil : les tuiles de catégories trient les alertes', (
+    tester,
+  ) async {
+    final alertes = FausseAlertes(initiales: alertesDeDepart());
+    await allerALInscription(tester, FausseAuth(), alertes: alertes);
+    await sInscrire(tester);
+    expect(find.text('Personne en detresse'), findsOneWidget);
+    expect(find.text('Objet perdu'), findsOneWidget);
+
+    // Le bouton « Catégories » affiche les tuiles.
+    await tester.tap(find.text('Catégories'));
+    await tester.pumpAndSettle();
+
+    // Urgences : seules les urgences restent.
+    await tester.tap(find.text('Voir les\nurgences'));
+    await tester.pumpAndSettle();
+    expect(find.text('Personne en detresse'), findsOneWidget);
+    expect(find.text('Objet perdu'), findsNothing);
+    expect(find.text('1 Alerte'), findsOneWidget);
+
+    // Aides : on change de tri.
+    await tester.tap(find.text('Voir les\naides'));
+    await tester.pumpAndSettle();
+    expect(find.text('Personne en detresse'), findsNothing);
+    expect(find.text('Objet perdu'), findsOneWidget);
+
+    // Dons : aucune alerte de ce type.
+    await tester.tap(find.text('Voir les\ndons'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Aucune alerte de ce type près de chez vous pour le moment.'),
+      findsOneWidget,
+    );
+
+    // Toucher la tuile choisie enlève le tri.
+    await tester.tap(find.text('Voir les\ndons'));
+    await tester.pumpAndSettle();
+    expect(find.text('Personne en detresse'), findsOneWidget);
+    expect(find.text('Objet perdu'), findsOneWidget);
+
+    // Fermer les tuiles remet aussi toutes les alertes.
+    await tester.tap(find.text('Voir les\nurgences'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Catégories'));
+    await tester.pumpAndSettle();
+    expect(find.text('Personne en detresse'), findsOneWidget);
+    expect(find.text('Objet perdu'), findsOneWidget);
+  });
+
+  testWidgets("Détails : l'itinéraire n'est proposé qu'avec une position", (
+    tester,
+  ) async {
+    final avecPosition = Alerte(
+      id: 'p1',
+      type: TypeAlerte.service,
+      categorie: 'Coup de main',
+      description: 'Porter des sacs.',
+      ville: 'Abidjan',
+      quartier: 'Marcory',
+      latitude: 5.30,
+      longitude: -3.99,
+      auteurId: 'mariam',
+      auteurNom: 'Mariam',
+      creeLe: DateTime.now().subtract(const Duration(minutes: 5)),
+    );
+    final alertes = FausseAlertes(
+      initiales: [avecPosition, ...alertesDeDepart()],
+    );
+    await allerALInscription(tester, FausseAuth(), alertes: alertes);
+    await sInscrire(tester);
+
+    // Une alerte sans position : pas d'itinéraire.
+    await tester.tap(find.text('Personne en detresse'));
+    await tester.pumpAndSettle();
+    expect(find.text('Itinéraire'), findsNothing);
+    await tester.tap(find.byIcon(Icons.chevron_left));
+    await tester.pumpAndSettle();
+
+    // Une alerte avec position : le bouton ouvre l'itinéraire jusqu'à elle.
+    final ouvertes = <Uri>[];
+    final ancien = lanceurExterne;
+    addTearDown(() => lanceurExterne = ancien);
+    lanceurExterne = (adresse) async {
+      ouvertes.add(adresse);
+      return true;
+    };
+    await tester.tap(find.text('Coup de main'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Itinéraire'));
+    await tester.tap(find.text('Itinéraire'));
+    await tester.pumpAndSettle();
+    expect(ouvertes, hasLength(1));
+    expect(ouvertes.single.queryParameters['destination'], '5.3,-3.99');
+
+    // Si aucune appli ne peut l'ouvrir, un message l'explique.
+    lanceurExterne = (adresse) async => false;
+    await tester.tap(find.text('Itinéraire'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text("Impossible d'ouvrir l'itinéraire sur ce téléphone."),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets("Terminer : l'aidant ne peut pas terminer l'alerte", (
     tester,
   ) async {
     final alertes = FausseAlertes(initiales: alertesDeDepart());
@@ -1022,17 +1144,41 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Je peux aider'));
     await avancer(tester);
+
+    // L'alerte n'est pas la mienne : pas de « Terminé », seulement « Stopper ».
+    expect(find.text('Terminé'), findsNothing);
+    expect(find.text('Stopper'), findsOneWidget);
+  });
+
+  testWidgets("Terminer : l'auteur résout son alerte et la note s'ouvre", (
+    tester,
+  ) async {
+    final mienne = Alerte(
+      id: 'm1',
+      type: TypeAlerte.service,
+      categorie: 'Besoin de courses',
+      description: 'Un coup de main pour porter des sacs.',
+      ville: 'Abidjan',
+      quartier: 'Plateau',
+      auteurId: 'moi',
+      auteurNom: 'Ange Fresnel',
+      aidantId: 'kouadio',
+      aidantNom: 'Kouadio Eliezer',
+      creeLe: DateTime.now().subtract(const Duration(minutes: 10)),
+    );
+    final alertes = FausseAlertes(initiales: [mienne]);
+    await allerALInscription(tester, FausseAuth(), alertes: alertes);
+    await sInscrire(tester);
+
+    await tester.tap(find.text('Besoin de courses'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Voir le suivi'));
+    await avancer(tester);
     await tester.tap(find.text('Terminé'));
     await tester.pumpAndSettle();
 
-    expect(alertes.actions, ['accepter:a1', 'terminer:a1']);
-    expect(find.text("Noter l'auteur"), findsOneWidget);
-    await tester.tap(find.text('Envoyer'));
-    await tester.pumpAndSettle();
-
-    // L'alerte résolue n'est plus proposée à l'accueil.
-    expect(find.text('1 Alerte'), findsOneWidget);
-    expect(find.text('Personne en detresse'), findsNothing);
+    expect(alertes.actions, ['terminer:m1']);
+    expect(find.text("Noter l'aidant"), findsOneWidget);
   });
 
   testWidgets('Poster une alerte : elle est publiée avec ma position', (
@@ -1366,7 +1512,7 @@ void main() {
     expect(find.text('Vous : Je suis en route'), findsOneWidget);
   });
 
-  testWidgets('Poster une alerte : la photo est coupée en paysage et publiée', (
+  testWidgets('Poster une alerte : la photo est gardée entière et publiée', (
     tester,
   ) async {
     final alertes = FausseAlertes(initiales: alertesDeDepart());
@@ -1388,8 +1534,8 @@ void main() {
     await tester.tap(find.text('Appuyer pour prendre une photo'));
     await tester.pumpAndSettle();
 
-    // La photo est demandée en paysage (2 pour 1), et un aperçu apparaît.
-    expect(photos.formes, [FormePhoto.paysage]);
+    // La photo est demandée en entier (sans coupe), et un aperçu apparaît.
+    expect(photos.formes, [FormePhoto.entiere]);
     expect(find.text('Appuyer pour prendre une photo'), findsNothing);
     expect(find.byIcon(Icons.close), findsOneWidget);
 
@@ -1882,59 +2028,39 @@ void main() {
     expect(notifications.actions, ['activer', 'desactiver']);
   });
 
-  testWidgets('Notifications : un message reçu, appli ouverte puis touché', (
-    tester,
-  ) async {
-    final notifications = FausseNotifications();
-    await allerALInscription(
-      tester,
-      FausseAuth(),
-      messagerie: FausseMessagerie(),
-      notifications: notifications,
-    );
-    await sInscrire(tester);
+  testWidgets(
+    'Notifications : toucher une notification ouvre la conversation',
+    (tester) async {
+      final notifications = FausseNotifications();
+      await allerALInscription(
+        tester,
+        FausseAuth(),
+        messagerie: FausseMessagerie(),
+        notifications: notifications,
+      );
+      await sInscrire(tester);
 
-    // Un message arrive pendant que l'appli est ouverte : un bandeau l'annonce.
-    notifications.recues.add(
-      const NotificationRecue(
-        titre: 'Oncle Kouassi',
-        texte: 'Tu es là ?',
-        type: 'message',
-        conversationId: 'c_kouassi',
-        expediteurId: 'kouassi',
-      ),
-    );
-    await tester.pump();
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 600));
-    expect(find.text('Oncle Kouassi : Tu es là ?'), findsOneWidget);
+      // Une notification d'un autre type est ignorée.
+      notifications.touchees.add(
+        const NotificationRecue(titre: 'Alerte', texte: 'x', type: 'alerte'),
+      );
+      await tester.pump();
+      expect(find.text('Dites bonjour à Oncle Kouassi.'), findsNothing);
 
-    // « Ouvrir » ouvre la conversation avec lui.
-    await tester.tap(find.text('Ouvrir'));
-    await tester.pumpAndSettle();
-    expect(find.text('Dites bonjour à Oncle Kouassi.'), findsOneWidget);
-
-    // Dans cette conversation, un autre message de lui n'est pas annoncé.
-    notifications.recues.add(
-      const NotificationRecue(
-        titre: 'Oncle Kouassi',
-        texte: 'Réponds-moi',
-        type: 'message',
-        conversationId: 'c_kouassi',
-        expediteurId: 'kouassi',
-      ),
-    );
-    await tester.pump();
-    await tester.pump();
-    expect(find.textContaining('Réponds-moi'), findsNothing);
-
-    // Une notification d'un autre type est ignorée.
-    notifications.recues.add(
-      const NotificationRecue(titre: 'Alerte', texte: 'x', type: 'alerte'),
-    );
-    await tester.pump();
-    expect(find.text('Alerte : x'), findsNothing);
-  });
+      // Toucher la notification d'un message ouvre la conversation avec lui.
+      notifications.touchees.add(
+        const NotificationRecue(
+          titre: 'Oncle Kouassi',
+          texte: 'Tu es là ?',
+          type: 'message',
+          conversationId: 'c_kouassi',
+          expediteurId: 'kouassi',
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Dites bonjour à Oncle Kouassi.'), findsOneWidget);
+    },
+  );
 
   testWidgets(
     'Notifications : toucher une notification ouvre la conversation',
@@ -2502,6 +2628,177 @@ void main() {
     );
   });
 
+  testWidgets('Messagerie : Localisation redemande l\'autorisation', (
+    tester,
+  ) async {
+    final messagerie = FausseMessagerie(contacts: [kouassi]);
+    final localisation = FausseLocalisation(
+      resultat: const ResultatLocalisation(EtatLocalisation.permissionBloquee),
+    );
+    await allerALInscription(
+      tester,
+      FausseAuth(),
+      messagerie: messagerie,
+      localisation: localisation,
+    );
+    await sInscrire(tester);
+    await tester.tap(find.text('Message'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.forum));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Oncle Kouassi'));
+    await tester.pumpAndSettle();
+
+    // Chaque appui cherche la position (donc demande l'autorisation).
+    final avant = localisation.recherches;
+    await tester.tap(find.text('Localisation'));
+    await tester.pumpAndSettle();
+    expect(localisation.recherches, avant + 1);
+    expect(messagerie.actions.where((a) => a.startsWith('position:')), isEmpty);
+    expect(
+      find.text('Autorisez la localisation de StarPole dans les réglages.'),
+      findsOneWidget,
+    );
+
+    // Le bouton mène aux réglages du téléphone.
+    await tester.tap(find.text('Réglages'));
+    await tester.pumpAndSettle();
+    expect(localisation.reglagesOuverts, [EtatLocalisation.permissionBloquee]);
+
+    // Une fois l'autorisation donnée, un nouvel appui envoie la position.
+    localisation.resultat = const ResultatLocalisation(
+      EtatLocalisation.ok,
+      LieuActuel(
+        ville: 'Abidjan',
+        quartier: 'Plateau',
+        latitude: 5.3197,
+        longitude: -4.0167,
+      ),
+    );
+    await tester.tap(find.text('Localisation'));
+    await tester.pumpAndSettle();
+    expect(messagerie.actions, contains('position:c_kouassi:5.3197'));
+  });
+
+  testWidgets('Messagerie : menu des trois points de la liste', (tester) async {
+    final messagerie = FausseMessagerie(contacts: [kouassi]);
+    final auth = FausseAuth();
+    await allerALInscription(tester, auth, messagerie: messagerie);
+    await sInscrire(tester);
+    await tester.tap(find.text('Message'));
+    await tester.pumpAndSettle();
+    messagerie.recevoir(kouassi, 'Tu es là ?');
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('non-lu')), findsOneWidget);
+
+    // Tout marquer comme lu : le repère disparaît.
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pumpAndSettle();
+    expect(find.text('Nouvelle conversation'), findsOneWidget);
+    await tester.tap(find.text('Tout marquer comme lu'));
+    await tester.pumpAndSettle();
+    expect(messagerie.actions, contains('lu:c_kouassi'));
+    expect(find.byKey(const ValueKey('non-lu')), findsNothing);
+
+    // Paramètres s'ouvre depuis le menu.
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Paramètres'));
+    await tester.pumpAndSettle();
+    expect(find.text("Conditions d'utilisation"), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.chevron_left));
+    await tester.pumpAndSettle();
+
+    // Déconnexion : confirmation, puis retour à la connexion.
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Déconnexion'));
+    await tester.pumpAndSettle();
+    expect(find.text('Se déconnecter ?'), findsOneWidget);
+    await tester.tap(find.text('Se déconnecter'));
+    await tester.pumpAndSettle();
+    expect(auth.appels, contains('deconnecter'));
+  });
+
+  testWidgets('Messagerie : panneau des emojis et message avec emoji', (
+    tester,
+  ) async {
+    final messagerie = FausseMessagerie(contacts: [kouassi]);
+    await allerALInscription(tester, FausseAuth(), messagerie: messagerie);
+    await sInscrire(tester);
+    await tester.tap(find.text('Message'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.forum));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Oncle Kouassi'));
+    await tester.pumpAndSettle();
+
+    // Le smiley ouvre le panneau des emojis ; l'icône devient un clavier.
+    expect(find.byType(EmojiPicker), findsNothing);
+    await tester.tap(find.byIcon(Icons.sentiment_satisfied_alt));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.byType(EmojiPicker), findsOneWidget);
+    expect(find.byIcon(Icons.keyboard_outlined), findsOneWidget);
+
+    // Le clavier referme le panneau.
+    await tester.tap(find.byIcon(Icons.keyboard_outlined));
+    await tester.pump();
+    expect(find.byType(EmojiPicker), findsNothing);
+
+    // Un message avec un emoji s'envoie et s'affiche tel quel.
+    await tester.enterText(find.byType(TextField), 'Merci 🙏');
+    await tester.tap(find.byIcon(Icons.send));
+    await tester.pumpAndSettle();
+    expect(messagerie.actions, contains('message:c_kouassi:Merci 🙏'));
+    expect(find.text('Merci 🙏'), findsOneWidget);
+  });
+
+  testWidgets("Ouverture : l'animation joue puis mène à la bienvenue", (
+    tester,
+  ) async {
+    Widget appli() => ApplicationStarPole(
+      auth: FausseAuth(),
+      alertes: FausseAlertes(),
+      messagerie: FausseMessagerie(),
+      carnet: FausseCarnet(),
+      appels: FausseAppel(),
+      constructeurCarte: carteDeTest,
+      notifications: FausseNotifications(),
+      localisation: FausseLocalisation(),
+    );
+
+    // L'animation commence ; à la fin, la bienvenue s'affiche toute seule.
+    await tester.pumpWidget(appli());
+    expect(find.byType(EcranOuverture), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 3000));
+    expect(find.text('Une étoile pour ne jamais rester seul.'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpAndSettle();
+    expect(find.byType(EcranOuverture), findsNothing);
+    expect(find.text('Suivant'), findsOneWidget);
+  });
+
+  testWidgets("Ouverture : un appui passe l'animation", (tester) async {
+    await tester.pumpWidget(
+      ApplicationStarPole(
+        auth: FausseAuth(),
+        alertes: FausseAlertes(),
+        messagerie: FausseMessagerie(),
+        carnet: FausseCarnet(),
+        appels: FausseAppel(),
+        constructeurCarte: carteDeTest,
+        notifications: FausseNotifications(),
+        localisation: FausseLocalisation(),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.byType(EcranOuverture));
+    await tester.pumpAndSettle();
+    expect(find.byType(EcranOuverture), findsNothing);
+    expect(find.text('Suivant'), findsOneWidget);
+  });
+
   testWidgets('Messagerie : modifier un de mes messages', (tester) async {
     final messagerie = FausseMessagerie(contacts: [kouassi]);
     await allerALInscription(tester, FausseAuth(), messagerie: messagerie);
@@ -2690,8 +2987,6 @@ Widget carteDeTest(BuildContext context, DonneesCarte donnees) {
 /// « recevoir » une notification.
 class FausseNotifications implements ServiceNotifications {
   final List<String> actions = [];
-  final StreamController<NotificationRecue> recues =
-      StreamController<NotificationRecue>.broadcast();
   final StreamController<NotificationRecue> touchees =
       StreamController<NotificationRecue>.broadcast();
   NotificationRecue? initiale;
@@ -2701,9 +2996,6 @@ class FausseNotifications implements ServiceNotifications {
 
   @override
   Future<void> desactiver() async => actions.add('desactiver');
-
-  @override
-  Stream<NotificationRecue> get auPremierPlan => recues.stream;
 
   @override
   Stream<NotificationRecue> get ouvertures => touchees.stream;

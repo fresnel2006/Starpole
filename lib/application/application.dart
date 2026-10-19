@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../fonctionnalites/info_departs/ecran_info_departs.dart';
+import '../fonctionnalites/ouverture/ecran_ouverture.dart';
 import '../fonctionnalites/principal/ecran_principal.dart';
 import '../noyau/position_utilisateur.dart';
 import '../noyau/service_alertes.dart';
@@ -28,6 +29,7 @@ class ApplicationStarPole extends StatelessWidget {
     this.appels,
     this.constructeurCarte,
     this.notifications,
+    this.animationOuverture = true,
   });
 
   /// Le service de compte (Firebase dans l'appli, un faux dans les tests).
@@ -57,8 +59,15 @@ class ApplicationStarPole extends StatelessWidget {
   /// Les notifications (de fausses notifications dans les tests).
   final ServiceNotifications? notifications;
 
+  /// Vrai pour jouer l'animation d'ouverture (désactivée dans les tests).
+  final bool animationOuverture;
+
   @override
   Widget build(BuildContext context) {
+    // Déjà connecté : on va directement à l'accueil.
+    final Widget depart = auth.estConnecte
+        ? const EcranPrincipal()
+        : const EcranInfoDeparts();
     final servicePosition = localisation ?? ServiceLocalisationReel();
     return MultiProvider(
       providers: [
@@ -85,10 +94,8 @@ class ApplicationStarPole extends StatelessWidget {
         theme: ThemeData(fontFamily: 'Poppins'),
         // Largeur limitée sur grand écran, texte plafonné.
         builder: cadreAdaptatif,
-        // Déjà connecté : on va directement à l'accueil.
-        home: auth.estConnecte
-            ? const EcranPrincipal()
-            : const EcranInfoDeparts(),
+        // L'animation d'ouverture, puis le premier écran.
+        home: animationOuverture ? EcranOuverture(suivant: depart) : depart,
       ),
     );
   }

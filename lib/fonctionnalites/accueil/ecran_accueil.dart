@@ -26,6 +26,9 @@ class _EcranAccueilState extends State<EcranAccueil> {
   /// Vrai quand les trois tuiles (urgences, aides, dons) sont affichées.
   bool _tuilesVisibles = false;
 
+  /// Le type d'alerte choisi avec les tuiles (null : toutes les alertes).
+  TypeAlerte? _filtre;
+
   /// Les alertes, en direct : l'écran se met à jour quand quelqu'un en publie.
   late final Stream<List<Alerte>> _alertes = context
       .read<ServiceAlertes>()
@@ -49,6 +52,7 @@ class _EcranAccueilState extends State<EcranAccueil> {
         .where(
           (a) =>
               a.statut == StatutAlerte.enCours &&
+              (_filtre == null || a.type == _filtre) &&
               (lieu == null || a.ville.isEmpty || a.ville == lieu.ville),
         )
         .take(20)
@@ -99,14 +103,23 @@ class _EcranAccueilState extends State<EcranAccueil> {
                   ),
                   texte: "Types d'alerte",
                   droite: GestureDetector(
-                    onTap: () =>
-                        setState(() => _tuilesVisibles = !_tuilesVisibles),
+                    onTap: () => setState(() {
+                      _tuilesVisibles = !_tuilesVisibles;
+                      // En fermant les tuiles, on revient à toutes les alertes.
+                      if (!_tuilesVisibles) _filtre = null;
+                    }),
                     child: const _BoutonCategories(),
                   ),
                 ),
                 if (_tuilesVisibles) ...[
                   const SizedBox(height: 18),
-                  const _TuilesTypes(),
+                  _TuilesTypes(
+                    filtre: _filtre,
+                    auChoix: (type) => setState(
+                      // Toucher la tuile déjà choisie enlève le tri.
+                      () => _filtre = _filtre == type ? null : type,
+                    ),
+                  ),
                 ],
                 const SizedBox(height: 26),
                 StreamBuilder<List<Alerte>>(
@@ -149,8 +162,12 @@ class _EcranAccueilState extends State<EcranAccueil> {
                             ),
                           )
                         else if (proches.isEmpty)
-                          const _MessageVide(
-                            'Aucune alerte près de chez vous pour le moment.',
+                          _MessageVide(
+                            _filtre == null
+                                ? 'Aucune alerte près de chez vous pour le '
+                                      'moment.'
+                                : 'Aucune alerte de ce type près de chez '
+                                      'vous pour le moment.',
                           )
                         else
                           for (final alerte in proches)
@@ -340,80 +357,115 @@ class _BadgeNombre extends StatelessWidget {
 
 /// Les trois grandes tuiles : urgences, aides, dons.
 class _TuilesTypes extends StatelessWidget {
-  const _TuilesTypes();
+  const _TuilesTypes({required this.filtre, required this.auChoix});
+
+  /// Le type choisi, ou null si aucun tri n'est actif.
+  final TypeAlerte? filtre;
+  final ValueChanged<TypeAlerte> auChoix;
 
   @override
   Widget build(BuildContext context) {
-    return const Row(
+    return Row(
       children: [
         Expanded(
           child: _TuileRaccourci(
             couleur: Couleurs.rouge,
-            icone: Icon(Icons.campaign_outlined, size: 44, color: Colors.white),
+            icone: Icons.campaign_outlined,
             libelle: 'Voir les\nurgences',
+            etat: _etat(TypeAlerte.urgence),
+            auAppui: () => auChoix(TypeAlerte.urgence),
           ),
         ),
-        SizedBox(width: 10),
+        const SizedBox(width: 10),
         Expanded(
           child: _TuileRaccourci(
             couleur: Couleurs.vert,
-            icone: Icon(
-              Icons.handshake_outlined,
-              size: 44,
-              color: Colors.white,
-            ),
+            icone: Icons.handshake_outlined,
             libelle: 'Voir les\naides',
+            etat: _etat(TypeAlerte.service),
+            auAppui: () => auChoix(TypeAlerte.service),
           ),
         ),
-        SizedBox(width: 10),
+        const SizedBox(width: 10),
         Expanded(
           child: _TuileRaccourci(
             couleur: Couleurs.bleu,
-            icone: Icon(
-              Icons.inventory_2_outlined,
-              size: 44,
-              color: Colors.white,
-            ),
+            icone: Icons.inventory_2_outlined,
             libelle: 'Voir les\ndons',
+            etat: _etat(TypeAlerte.don),
+            auAppui: () => auChoix(TypeAlerte.don),
           ),
         ),
       ],
     );
   }
+
+  /// Choisie, estompée (une autre est choisie) ou normale.
+  _EtatTuile _etat(TypeAlerte type) {
+    if (filtre == null) return _EtatTuile.normale;
+    return filtre == type ? _EtatTuile.choisie : _EtatTuile.estompee;
+  }
 }
 
-/// Grande tuile colorée avec une icône et un texte sur deux lignes.
+enum _EtatTuile { normale, choisie, estompee }
+
+/// Grande tuile colorée avec une icône et un texte sur deux lignes. Un appui
+/// trie la liste des alertes sur ce type.
 class _TuileRaccourci extends StatelessWidget {
   const _TuileRaccourci({
     required this.couleur,
     required this.icone,
     required this.libelle,
+    required this.etat,
+    required this.auAppui,
   });
 
   final Color couleur;
-  final Widget icone;
+  final IconData icone;
   final String libelle;
+  final _EtatTuile etat;
+  final VoidCallback auAppui;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 145,
-      padding: const EdgeInsets.fromLTRB(8, 22, 8, 14),
-      decoration: BoxDecoration(
-        color: couleur,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: Styles.ombre,
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          icone,
-          Text(
-            libelle,
-            textAlign: TextAlign.center,
-            style: Styles.gras(13.5, Colors.white, hauteur: 1.35),
+    final choisie = etat == _EtatTuile.choisie;
+    return Semantics(
+      button: true,
+      selected: choisie,
+      label: libelle.replaceAll('\n', ' '),
+      child: GestureDetector(
+        onTap: auAppui,
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 150),
+          opacity: etat == _EtatTuile.estompee ? 0.4 : 1,
+          child: Container(
+            height: 145,
+            padding: const EdgeInsets.fromLTRB(8, 22, 8, 14),
+            decoration: BoxDecoration(
+              color: couleur,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: Styles.ombre,
+              border: choisie
+                  ? Border.all(color: Colors.black, width: 2.5)
+                  : null,
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Icon(
+                  choisie ? Icons.check_circle_outline : icone,
+                  size: 44,
+                  color: Colors.white,
+                ),
+                Text(
+                  libelle,
+                  textAlign: TextAlign.center,
+                  style: Styles.gras(13.5, Colors.white, hauteur: 1.35),
+                ),
+              ],
+            ),
           ),
-        ],
+        ),
       ),
     );
   }

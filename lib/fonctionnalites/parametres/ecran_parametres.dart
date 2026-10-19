@@ -63,49 +63,7 @@ class EcranParametres extends StatelessWidget {
   }
 
   /// Demande confirmation, puis déconnecte et revient à la page de connexion.
-  Future<void> _seDeconnecter(BuildContext context) async {
-    final auth = context.read<ServiceAuth>();
-    final notifications = context.read<ServiceNotifications>();
-    final navigateur = Navigator.of(context);
-    final confirme = await showDialog<bool>(
-      context: context,
-      builder: (contexte) => AlertDialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: Text('Se déconnecter ?', style: Styles.gras(17, Colors.black)),
-        content: Text(
-          'Vous devrez vous reconnecter pour utiliser StarPole.',
-          style: Styles.gras(
-            13,
-            Couleurs.grisTexte,
-            hauteur: 1.5,
-            poids: FontWeight.w500,
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(contexte).pop(false),
-            child: Text('Annuler', style: Styles.gras(14, Couleurs.grisTexte)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(contexte).pop(true),
-            child: Text(
-              'Se déconnecter',
-              style: Styles.gras(14, Couleurs.rouge),
-            ),
-          ),
-        ],
-      ),
-    );
-    if (confirme != true) return;
-    // Ce téléphone ne doit plus recevoir les notifications de ce compte.
-    await notifications.desactiver();
-    await auth.deconnecter();
-    await navigateur.pushAndRemoveUntil(
-      MaterialPageRoute<void>(builder: (_) => const EcranConnexion()),
-      (_) => false,
-    );
-  }
+  Future<void> _seDeconnecter(BuildContext context) => seDeconnecter(context);
 
   @override
   Widget build(BuildContext context) {
@@ -153,4 +111,46 @@ class EcranParametres extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Demande confirmation, puis déconnecte et revient à la page de connexion.
+Future<void> seDeconnecter(BuildContext context) async {
+  final auth = context.read<ServiceAuth>();
+  final notifications = context.read<ServiceNotifications>();
+  final navigateur = Navigator.of(context);
+  final confirme = await showDialog<bool>(
+    context: context,
+    builder: (contexte) => AlertDialog(
+      backgroundColor: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      title: Text('Se déconnecter ?', style: Styles.gras(17, Colors.black)),
+      content: Text(
+        'Vous devrez vous reconnecter pour utiliser StarPole.',
+        style: Styles.gras(
+          13,
+          Couleurs.grisTexte,
+          hauteur: 1.5,
+          poids: FontWeight.w500,
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(contexte).pop(false),
+          child: Text('Annuler', style: Styles.gras(14, Couleurs.grisTexte)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(contexte).pop(true),
+          child: Text('Se déconnecter', style: Styles.gras(14, Couleurs.rouge)),
+        ),
+      ],
+    ),
+  );
+  if (confirme != true) return;
+  // Ce téléphone ne doit plus recevoir les notifications de ce compte.
+  await notifications.desactiver();
+  await auth.deconnecter();
+  await navigateur.pushAndRemoveUntil(
+    MaterialPageRoute<void>(builder: (_) => const EcranConnexion()),
+    (_) => false,
+  );
 }

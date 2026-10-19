@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Modify this file to customize your launch splash screen -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="@android:color/white" />
+    <!-- Même fond sombre que l'animation d'ouverture : pas de flash blanc. -->
+    <item>
+        <color android:color="#0D0D11" />
+    </item>
 
     <!-- You can insert your own image assets here -->
     <!-- <item>

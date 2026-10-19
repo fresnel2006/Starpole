@@ -1,4 +1,5 @@
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'alerte.dart';
 
@@ -28,4 +29,25 @@ Future<void> partagerAlerte(Alerte alerte) {
     "StarPole, l'appli d'entraide de quartier. Bientôt disponible.",
   ];
   return SharePlus.instance.share(ShareParams(text: lignes.join('\n')));
+}
+
+/// Ouvre une adresse web dans une autre appli (remplaçable dans les tests).
+Future<bool> Function(Uri adresse) lanceurExterne = (adresse) =>
+    launchUrl(adresse, mode: LaunchMode.externalApplication);
+
+/// Ouvre l'application de cartes du téléphone (Google Maps en général) avec
+/// l'itinéraire jusqu'à l'alerte, depuis la position actuelle. Renvoie faux si
+/// l'alerte n'a pas de position ou si rien ne peut s'ouvrir.
+Future<bool> ouvrirItineraire(Alerte alerte) async {
+  if (!alerte.aUnePosition) return false;
+  final adresse = Uri.https('www.google.com', '/maps/dir/', {
+    'api': '1',
+    'destination': '${alerte.latitude},${alerte.longitude}',
+    'travelmode': 'driving',
+  });
+  try {
+    return await lanceurExterne(adresse);
+  } catch (_) {
+    return false;
+  }
 }

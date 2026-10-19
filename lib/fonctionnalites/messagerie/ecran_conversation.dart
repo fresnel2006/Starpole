@@ -1,3 +1,4 @@
+import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' show LatLng;
@@ -7,6 +8,7 @@ import '../../application/couleurs.dart';
 import '../../noyau/format_temps.dart';
 import '../../noyau/messagerie.dart';
 import '../../noyau/position_utilisateur.dart';
+import '../../noyau/service_localisation.dart';
 import '../../noyau/service_photo.dart';
 import '../../noyau/appel.dart';
 import '../../noyau/service_appel.dart';
@@ -15,6 +17,7 @@ import '../../noyau/service_notifications.dart';
 import '../../partage/composants/avatar_utilisateur.dart';
 import '../../partage/composants/vibrant.dart';
 import '../../partage/composants/couche_tuiles.dart';
+import '../../partage/composants/menu_trois_points.dart';
 import '../../partage/styles.dart';
 import '../appel/ecran_appel.dart';
 import 'ecran_medias.dart';
@@ -52,6 +55,10 @@ class _EcranConversationState extends State<EcranConversation> {
   );
 
   final TextEditingController _saisie = TextEditingController();
+  final FocusNode _focusSaisie = FocusNode();
+
+  /// Vrai quand le panneau des emojis remplace le clavier.
+  bool _emojisOuverts = false;
 
   /// Recherche dans la conversation (ouverte par le menu des trois points).
   final TextEditingController _requete = TextEditingController();
@@ -84,14 +91,22 @@ class _EcranConversationState extends State<EcranConversation> {
       conversationAffichee.value = null;
     }
     _saisie.dispose();
+    _focusSaisie.dispose();
     _requete.dispose();
     super.dispose();
   }
 
-  void _afficherMessage(String texte) {
+  void _afficherMessage(String texte, {String? action, VoidCallback? auAppui}) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(texte)));
+      ..showSnackBar(
+        SnackBar(
+          content: Text(texte),
+          action: action == null || auAppui == null
+              ? null
+              : SnackBarAction(label: action, onPressed: auAppui),
+        ),
+      );
   }
 
   /// Le nom à afficher pour l'auteur d'un message cité.
@@ -125,35 +140,26 @@ class _EcranConversationState extends State<EcranConversation> {
     });
   }
 
-  /// Menu des trois points de l'en-tête.
-  Future<void> _ouvrirMenuConversation() async {
-    final choix = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
-      ),
-      builder: (contexte) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 8),
-            _ActionMenu(
-              icone: Icons.search,
-              texte: 'Rechercher un message',
-              auAppui: () => Navigator.of(contexte).pop('rechercher'),
-            ),
-            _ActionMenu(
-              icone: Icons.photo_library_outlined,
-              texte: 'Photos et positions',
-              auAppui: () => Navigator.of(contexte).pop('medias'),
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-    if (!mounted) return;
+  /// Bascule entre le clavier et le panneau des emojis.
+  void _basculerEmojis() {
+    if (_emojisOuverts) {
+      setState(() => _emojisOuverts = false);
+      _focusSaisie.requestFocus();
+    } else {
+      _focusSaisie.unfocus();
+      setState(() => _emojisOuverts = true);
+    }
+  }
+
+  void _fermerRecherche() {
+    setState(() {
+      _rechercheOuverte = false;
+      _requete.clear();
+    });
+  }
+
+  /// Ce qui est choisi dans le menu des trois points de l'en-tête.
+  Future<void> _choisirDansMenu(String choix) async {
     if (choix == 'rechercher') setState(() => _rechercheOuverte = true);
     if (choix == 'medias') {
       await Navigator.of(context).push(
@@ -163,13 +169,6 @@ class _EcranConversationState extends State<EcranConversation> {
         ),
       );
     }
-  }
-
-  void _fermerRecherche() {
-    setState(() {
-      _rechercheOuverte = false;
-      _requete.clear();
-    });
   }
 
   /// Menu d'un message (appui long) : répondre, et modifier si c'est le mien.
@@ -274,16 +273,14 @@ class _EcranConversationState extends State<EcranConversation> {
     final position = context.read<PositionUtilisateur>();
     setState(() => _envoiEnCours = true);
     try {
-      if (position.lieu?.latitude == null) await position.actualiser();
+      // À chaque appui, on demande l'autorisation si besoin et on prend la
+      // position du moment.
+      await position.actualiser();
       final lieu = position.lieu;
       final latitude = lieu?.latitude;
       final longitude = lieu?.longitude;
       if (lieu == null || latitude == null || longitude == null) {
-        if (mounted) {
-          _afficherMessage(
-            'Activez la localisation pour envoyer votre position.',
-          );
-        }
+        if (mounted) _expliquerPositionImpossible(position);
         return;
       }
       await _service.envoyerMessage(
@@ -296,6 +293,41 @@ class _EcranConversationState extends State<EcranConversation> {
       if (mounted) _afficherMessage(e.message);
     } finally {
       if (mounted) setState(() => _envoiEnCours = false);
+    }
+  }
+
+  /// Dit pourquoi la position n'a pas pu être envoyée, avec un bouton pour
+  /// y remédier (réglages du téléphone ou nouvelle demande).
+  void _expliquerPositionImpossible(PositionUtilisateur position) {
+    switch (position.resultat?.etat) {
+      case EtatLocalisation.serviceDesactive:
+        _afficherMessage(
+          'Activez la localisation du téléphone pour envoyer votre position.',
+          action: 'Réglages',
+          auAppui: () => context.read<ServiceLocalisation>().ouvrirReglages(
+            EtatLocalisation.serviceDesactive,
+          ),
+        );
+      case EtatLocalisation.permissionBloquee:
+        _afficherMessage(
+          'Autorisez la localisation de StarPole dans les réglages.',
+          action: 'Réglages',
+          auAppui: () => context.read<ServiceLocalisation>().ouvrirReglages(
+            EtatLocalisation.permissionBloquee,
+          ),
+        );
+      case EtatLocalisation.permissionRefusee:
+        _afficherMessage(
+          'Sans autorisation, votre position ne peut pas être envoyée.',
+          action: 'Réessayer',
+          auAppui: _envoyerPosition,
+        );
+      default:
+        _afficherMessage(
+          'Position introuvable. Réessayez dans un instant.',
+          action: 'Réessayer',
+          auAppui: _envoyerPosition,
+        );
     }
   }
 
@@ -380,7 +412,7 @@ class _EcranConversationState extends State<EcranConversation> {
                 autreNom: widget.autreNom,
                 auAppel: () => _appeler(video: false),
                 auVideo: () => _appeler(video: true),
-                auMenu: _ouvrirMenuConversation,
+                auChoix: _choisirDansMenu,
               ),
             Expanded(
               child: StreamBuilder<List<Message>>(
@@ -459,7 +491,38 @@ class _EcranConversationState extends State<EcranConversation> {
               envoyer: _envoyer,
               envoyerPosition: _envoyerPosition,
               envoyerPhoto: _envoyerPhoto,
+              focus: _focusSaisie,
+              emojisOuverts: _emojisOuverts,
+              auEmoji: _basculerEmojis,
+              auChampTouche: () {
+                if (_emojisOuverts) setState(() => _emojisOuverts = false);
+              },
             ),
+            if (_emojisOuverts)
+              EmojiPicker(
+                textEditingController: _saisie,
+                config: Config(
+                  height: 260,
+                  checkPlatformCompatibility: true,
+                  emojiViewConfig: EmojiViewConfig(
+                    backgroundColor: Colors.white,
+                    emojiSizeMax: 28,
+                  ),
+                  categoryViewConfig: const CategoryViewConfig(
+                    backgroundColor: Colors.white,
+                    indicatorColor: Couleurs.rouge,
+                    iconColorSelected: Couleurs.rouge,
+                  ),
+                  bottomActionBarConfig: const BottomActionBarConfig(
+                    backgroundColor: Colors.white,
+                    buttonColor: Colors.white,
+                    buttonIconColor: Couleurs.rouge,
+                  ),
+                  searchViewConfig: const SearchViewConfig(
+                    backgroundColor: Colors.white,
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -493,14 +556,14 @@ class _Entete extends StatelessWidget {
     required this.autreNom,
     required this.auAppel,
     required this.auVideo,
-    required this.auMenu,
+    required this.auChoix,
   });
 
   final String autreId;
   final String autreNom;
   final VoidCallback auAppel;
   final VoidCallback auVideo;
-  final VoidCallback auMenu;
+  final ValueChanged<String> auChoix;
 
   @override
   Widget build(BuildContext context) {
@@ -571,17 +634,20 @@ class _Entete extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          Semantics(
-            button: true,
-            label: 'Plus d\'options',
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: auMenu,
-              child: const Padding(
-                padding: EdgeInsets.all(4),
-                child: Icon(Icons.more_vert, size: 24, color: Colors.black),
+          MenuTroisPoints(
+            auChoix: auChoix,
+            entrees: const [
+              EntreeMenu(
+                valeur: 'rechercher',
+                icone: Icons.search,
+                texte: 'Rechercher un message',
               ),
-            ),
+              EntreeMenu(
+                valeur: 'medias',
+                icone: Icons.photo_library_outlined,
+                texte: 'Photos et positions',
+              ),
+            ],
           ),
         ],
       ),
@@ -1052,8 +1118,16 @@ class _ZoneSaisie extends StatelessWidget {
     required this.envoyer,
     required this.envoyerPosition,
     required this.envoyerPhoto,
+    required this.focus,
+    required this.emojisOuverts,
+    required this.auEmoji,
+    required this.auChampTouche,
   });
 
+  final FocusNode focus;
+  final bool emojisOuverts;
+  final VoidCallback auEmoji;
+  final VoidCallback auChampTouche;
   final TextEditingController controleur;
   final GlobalKey<VibrantState> cle;
   final bool envoiEnCours;
@@ -1085,15 +1159,27 @@ class _ZoneSaisie extends StatelessWidget {
                     ),
                     child: Row(
                       children: [
-                        const Icon(
-                          Icons.sentiment_satisfied_alt,
-                          size: 24,
-                          color: Color(0xFFFFB300),
+                        Semantics(
+                          button: true,
+                          label: emojisOuverts ? 'Clavier' : 'Emojis',
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: auEmoji,
+                            child: Icon(
+                              emojisOuverts
+                                  ? Icons.keyboard_outlined
+                                  : Icons.sentiment_satisfied_alt,
+                              size: 24,
+                              color: const Color(0xFFFFB300),
+                            ),
+                          ),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: TextField(
                             controller: controleur,
+                            focusNode: focus,
+                            onTap: auChampTouche,
                             maxLength: 1000,
                             textInputAction: TextInputAction.send,
                             onSubmitted: (_) => envoyer(),
