@@ -5,8 +5,8 @@ import 'package:flutter/services.dart';
 
 import '../../application/couleurs.dart';
 
-/// Fond sombre de l'ouverture (charte StarPole).
-const Color fondOuverture = Color(0xFF0D0D11);
+/// Fond blanc de l'ouverture, comme le reste de l'appli.
+const Color fondOuverture = Colors.white;
 
 /// Animation d'ouverture : l'étoile StarPole se dessine branche par branche en
 /// tournant, s'illumine et envoie deux ondes, puis le nom apparaît lettre par
@@ -71,7 +71,7 @@ class _EcranOuvertureState extends State<EcranOuverture>
   @override
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light,
+      value: SystemUiOverlayStyle.dark,
       child: Scaffold(
         backgroundColor: fondOuverture,
         body: GestureDetector(
@@ -137,14 +137,14 @@ class _EcranOuvertureState extends State<EcranOuverture>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Le nom, lettre par lettre : « Star » en blanc, « Pole » en rouge.
+              // Le nom, lettre par lettre : « Star » en noir, « Pole » en rouge.
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   for (var i = 0; i < nom.length; i++)
                     _Lettre(
                       lettre: nom[i],
-                      couleur: i < 4 ? Colors.white : Couleurs.rouge,
+                      couleur: i < 4 ? Colors.black : Couleurs.rouge,
                       progression: _etape(0.5 + i * 0.022, 0.68 + i * 0.022),
                     ),
                 ],
@@ -170,7 +170,7 @@ class _EcranOuvertureState extends State<EcranOuverture>
                       fontFamily: 'Poppins',
                       fontSize: 13.5,
                       fontWeight: FontWeight.w500,
-                      color: Color(0xFF9A9AA6),
+                      color: Couleurs.grisTexte,
                       letterSpacing: 0.2,
                     ),
                   ),
@@ -233,8 +233,8 @@ class _PeintreFond extends CustomPainter {
     final peinture = Paint()
       ..shader = RadialGradient(
         colors: [
-          Couleurs.rouge.withValues(alpha: 0.22 * lueur),
-          Couleurs.rougeFonce.withValues(alpha: 0.08 * lueur),
+          Couleurs.rouge.withValues(alpha: 0.10 * lueur),
+          Couleurs.rouge.withValues(alpha: 0.03 * lueur),
           fondOuverture.withValues(alpha: 0),
         ],
         stops: const [0, 0.45, 1],
@@ -295,7 +295,7 @@ class _PeintreEtoile extends CustomPainter {
         centre,
         r * 0.55,
         Paint()
-          ..color = Couleurs.rouge.withValues(alpha: 0.45 * eclat)
+          ..color = Couleurs.rouge.withValues(alpha: 0.22 * eclat)
           ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 34),
       );
     }
