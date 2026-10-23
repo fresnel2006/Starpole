@@ -17,6 +17,8 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Notifications (Android 13 et plus). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Appel entrant affiché en plein écran, comme un appel téléphonique. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <application
         android:label="StarPole"
         android:name="${applicationName}"
@@ -48,6 +50,10 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- Boutons « Répondre » et « Refuser » des notifications d'appel. -->
+        <receiver
+            android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ActionBroadcastReceiver" />
         <!-- Petite icône et couleur des notifications : l'étoile rouge StarPole. -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_icon"

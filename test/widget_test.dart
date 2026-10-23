@@ -12,6 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:projet_starpole/fonctionnalites/ouverture/ecran_ouverture.dart';
 import 'package:projet_starpole/application/application.dart';
 import 'package:projet_starpole/application/couleurs.dart';
+import 'package:projet_starpole/noyau/notification_appel.dart';
 import 'package:projet_starpole/noyau/alerte.dart';
 import 'package:projet_starpole/partage/composants/carte_3d.dart';
 import 'package:projet_starpole/noyau/appel.dart';
@@ -2441,6 +2442,58 @@ void main() {
     await tester.pumpAndSettle();
     expect(appels.actions, ['repondre:a1', 'refuser:a2']);
     expect(find.text('Appel vidéo StarPole'), findsNothing);
+  });
+
+  testWidgets("Appel : « Répondre » dans la notification décroche", (
+    tester,
+  ) async {
+    final appels = FausseAppel();
+    await allerALInscription(tester, FausseAuth(), appels: appels);
+    await sInscrire(tester);
+    addTearDown(() => appelARepondre.value = null);
+
+    // L'appel arrive, puis on touche « Répondre » dans la notification.
+    appels.entrants.add(
+      const AppelEntrant(
+        id: 'a7',
+        appelantId: 'kouassi',
+        appelantNom: 'Oncle Kouassi',
+        video: false,
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('Appel vocal StarPole'), findsOneWidget);
+    appelARepondre.value = 'a7';
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump(const Duration(milliseconds: 500));
+
+    // L'écran a décroché tout seul : l'appel est en cours.
+    expect(appels.actions, ['repondre:a7']);
+    expect(appelARepondre.value, isNull);
+    expect(find.byIcon(Icons.call_end), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.call_end));
+    await tester.pumpAndSettle();
+  });
+
+  test("Notification d'appel : lecture des données du serveur", () {
+    final appel = DonneesAppel.depuis({
+      'type': 'appel',
+      'appelId': 'x1',
+      'appelantNom': 'Mariam',
+      'video': 'true',
+    })!;
+    expect(appel.appelId, 'x1');
+    expect(appel.appelantNom, 'Mariam');
+    expect(appel.video, isTrue);
+    // Le contenu de la notification se relit à l'identique.
+    final relu = DonneesAppel.depuisContenu(appel.contenu)!;
+    expect(relu.appelId, 'x1');
+    expect(relu.video, isTrue);
+    // Un message n'est pas un appel ; un appel sans identifiant non plus.
+    expect(DonneesAppel.depuis({'type': 'message'}), isNull);
+    expect(DonneesAppel.depuis({'type': 'appel'}), isNull);
+    expect(DonneesAppel.depuisContenu('pas du json'), isNull);
   });
 
   testWidgets('Messagerie : écrire à un contact et le voir dans la liste', (

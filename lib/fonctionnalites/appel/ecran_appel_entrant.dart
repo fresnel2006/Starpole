@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../../application/couleurs.dart';
 import '../../noyau/appel.dart';
+import '../../noyau/notification_appel.dart';
 import '../../noyau/service_appel.dart';
 import '../../noyau/sonnerie.dart';
 import '../../partage/composants/avatar_utilisateur.dart';
@@ -23,7 +24,8 @@ class EcranAppelEntrant extends StatefulWidget {
   State<EcranAppelEntrant> createState() => _EcranAppelEntrantState();
 }
 
-class _EcranAppelEntrantState extends State<EcranAppelEntrant> {
+class _EcranAppelEntrantState extends State<EcranAppelEntrant>
+    with WidgetsBindingObserver {
   late final ServiceAppel _service = context.read<ServiceAppel>();
   StreamSubscription<AppelEntrant?>? _abonnement;
   Timer? _sonnerie;
@@ -37,17 +39,46 @@ class _EcranAppelEntrantState extends State<EcranAppelEntrant> {
     _abonnement = _service.appelsEntrants().listen((appel) {
       if (appel?.id != widget.appel.id) _fermer();
     });
+    WidgetsBinding.instance.addObserver(this);
+    // Appli au premier plan : l'écran sonne lui-même. Sinon, c'est la
+    // notification d'appel qui sonne (pas de double sonnerie).
+    final etat = WidgetsBinding.instance.lifecycleState;
+    if (etat == null || etat == AppLifecycleState.resumed) _sonnerIci();
+    // « Répondre » a été touché dans la notification : on décroche.
+    appelARepondre.addListener(_verifierReponse);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _verifierReponse());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    appelARepondre.removeListener(_verifierReponse);
+    _abonnement?.cancel();
+    _sonnerie?.cancel();
+    SonnerieAppel.couper();
+    retirerNotificationAppel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState etat) {
+    if (etat == AppLifecycleState.resumed && _sonnerie == null && !_enReponse) {
+      _sonnerIci();
+    }
+  }
+
+  /// L'appli est visible : on retire la notification et l'écran sonne.
+  void _sonnerIci() {
+    retirerNotificationAppel();
     SonnerieAppel.sonner();
     _sonner();
     _sonnerie = Timer.periodic(const Duration(seconds: 2), (_) => _sonner());
   }
 
-  @override
-  void dispose() {
-    _abonnement?.cancel();
-    _sonnerie?.cancel();
-    SonnerieAppel.couper();
-    super.dispose();
+  void _verifierReponse() {
+    if (!mounted || appelARepondre.value != widget.appel.id) return;
+    appelARepondre.value = null;
+    _repondre();
   }
 
   /// Une vibration, répétée tant que ça sonne (le son est celui de la

@@ -7,6 +7,8 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import 'notification_appel.dart';
+
 /// Une notification (reçue ou touchée).
 class NotificationRecue {
   const NotificationRecue({
@@ -119,11 +121,18 @@ class ServiceNotificationsFirebase implements ServiceNotifications {
   Future<void> _preparerLocales() async {
     if (_localesPretes) return;
     await _locales.initialize(
-      settings: const InitializationSettings(
-        android: AndroidInitializationSettings(_icone),
-      ),
+      settings: reglagesNotifications,
+      // « Refuser » sur un appel quand l'appli n'est pas ouverte.
+      onDidReceiveBackgroundNotificationResponse:
+          reponseNotificationArrierePlan,
       // Toucher une notification affichée par l'appli ouvre la conversation.
       onDidReceiveNotificationResponse: (reponse) {
+        // Notification d'appel : « Refuser » refuse, « Répondre » décroche.
+        final appel = DonneesAppel.depuisContenu(reponse.payload);
+        if (appel != null) {
+          _repondreA(appel, reponse.actionId);
+          return;
+        }
         final payload = reponse.payload;
         if (payload == null) return;
         try {
@@ -147,7 +156,22 @@ class ServiceNotificationsFirebase implements ServiceNotifications {
           AndroidFlutterLocalNotificationsPlugin
         >()
         ?.createNotificationChannel(_canal);
+    await _locales
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >()
+        ?.createNotificationChannel(canalAppels);
     _localesPretes = true;
+  }
+
+  /// Ce qu'on a choisi sur une notification d'appel.
+  void _repondreA(DonneesAppel appel, String? action) {
+    if (action == 'refuser') {
+      refuserAppelDepuisNotification(appel.appelId);
+    } else if (action == 'repondre') {
+      appelARepondre.value = appel.appelId;
+    }
+    // Un simple appui ouvre l'appli : l'écran d'appel entrant s'affiche.
   }
 
   /// Un message arrive pendant que l'appli est ouverte : Android ne montre
@@ -228,6 +252,19 @@ class ServiceNotificationsFirebase implements ServiceNotifications {
 
   @override
   Future<NotificationRecue?> ouvertureInitiale() async {
+    // L'appli a été ouverte par « Répondre » sur une notification d'appel.
+    try {
+      await _preparerLocales();
+      final lancement = await _locales.getNotificationAppLaunchDetails();
+      final reponse = lancement?.notificationResponse;
+      final appel = DonneesAppel.depuisContenu(reponse?.payload);
+      if (lancement?.didNotificationLaunchApp == true && appel != null) {
+        _repondreA(appel, reponse?.actionId);
+        return null;
+      }
+    } catch (e) {
+      debugPrint('Notifications : lancement illisible ($e)');
+    }
     final message = await _messagerie.getInitialMessage();
     return message == null ? null : _depuis(message);
   }

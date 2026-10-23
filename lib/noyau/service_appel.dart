@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import 'appel.dart';
+import 'serveur_starpole.dart';
 import 'messagerie.dart';
 
 /// Un appel en cours (sortant ou entrant), vu par l'écran d'appel.
@@ -128,6 +129,8 @@ class ServiceAppelFirebase implements ServiceAppel {
         'offre': offre,
       });
       session.documentPret();
+      // Le serveur fait sonner le téléphone de l'autre, même appli fermée.
+      unawaited(_prevenirLeServeur(ref.id));
     } on ErreurAppel {
       session.dispose();
       rethrow;
@@ -138,6 +141,20 @@ class ServiceAppelFirebase implements ServiceAppel {
       );
     }
     return session;
+  }
+
+  /// Demande au serveur la notification d'appel. Une erreur n'empêche pas
+  /// l'appel : l'autre le voit quand même si son appli est ouverte.
+  Future<void> _prevenirLeServeur(String appelId) async {
+    try {
+      final jeton = await _auth.currentUser?.getIdToken();
+      if (jeton == null) return;
+      await ServeurStarPole.envoyer('/notifications/appel', {
+        'appelId': appelId,
+      }, jeton: jeton);
+    } catch (e) {
+      debugPrint('Notification d\'appel non envoyée ($e)');
+    }
   }
 
   @override

@@ -503,7 +503,9 @@ class _EcranConversationState extends State<EcranConversation> {
                 textEditingController: _saisie,
                 config: Config(
                   height: 260,
-                  checkPlatformCompatibility: true,
+                  // Pas d'appel au code Android du paquet : le panneau
+                  // s'affiche même si l'appli a seulement été rechargée.
+                  checkPlatformCompatibility: false,
                   emojiViewConfig: EmojiViewConfig(
                     backgroundColor: Colors.white,
                     emojiSizeMax: 28,
