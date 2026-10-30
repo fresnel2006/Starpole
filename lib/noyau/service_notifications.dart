@@ -179,7 +179,10 @@ class ServiceNotificationsFirebase implements ServiceNotifications {
   /// train de lire cette conversation.
   Future<void> _afficher(RemoteMessage message) async {
     final notification = _depuis(message);
-    if (notification.type != 'message') return;
+    // Messages, et alertes retirées par la vérification automatique.
+    if (notification.type != 'message' && notification.type != 'moderation') {
+      return;
+    }
     if (notification.conversationId == conversationAffichee.value) return;
     await _locales.show(
       id:

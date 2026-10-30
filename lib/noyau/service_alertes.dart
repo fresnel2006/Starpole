@@ -6,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import 'alerte.dart';
+import 'serveur_starpole.dart';
 
 /// Erreur sur une alerte, avec un message en français prêt à afficher.
 class ErreurAlerte implements Exception {
@@ -198,8 +199,9 @@ class ServiceAlertesFirebase implements ServiceAlertes {
     if (uid == null) {
       throw const ErreurAlerte('Connectez-vous pour publier une alerte.');
     }
+    final DocumentReference<Map<String, dynamic>> ref;
     try {
-      await _alertes.add({
+      ref = await _alertes.add({
         'type': type.code,
         'categorie': categorie,
         'description': description.trim(),
@@ -221,6 +223,24 @@ class ServiceAlertesFirebase implements ServiceAlertes {
       throw const ErreurAlerte(
         "Impossible de publier l'alerte. Vérifiez votre connexion.",
       );
+    }
+    // L'alerte est en ligne tout de suite. En arrière-plan, le serveur la
+    // fait vérifier par l'IA : si elle n'est pas conforme, il la supprime et
+    // prévient l'auteur.
+    unawaited(_faireVerifier(ref.id));
+  }
+
+  /// Demande au serveur de vérifier l'alerte. Une erreur ici n'empêche rien :
+  /// l'alerte reste publiée.
+  Future<void> _faireVerifier(String alerteId) async {
+    try {
+      final jeton = await _auth.currentUser?.getIdToken();
+      if (jeton == null) return;
+      await ServeurStarPole.envoyer('/moderation/alerte', {
+        'alerteId': alerteId,
+      }, jeton: jeton);
+    } catch (_) {
+      // Vérification non faite : sans conséquence pour la publication.
     }
   }
 

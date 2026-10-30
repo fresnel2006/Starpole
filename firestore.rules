@@ -3,6 +3,14 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // Administrateur de la console web : compte qui porte la revendication
+    // personnalisée `admin: true` (donnée par le script role_admin.py).
+    // Les admins n'ont AUCUN droit sur les conversations, messages, appels,
+    // candidats, appareils et contacts.
+    function estAdmin() {
+      return request.auth != null && request.auth.token.get('admin', false) == true;
+    }
+
     // Profil d'un utilisateur : tout utilisateur connecté peut lire un profil
     // précis (pour voir le nom d'un voisin) ou en chercher un (recherche d'un
     // contact, ou recherche des contacts du carnet : au plus 30 résultats,
@@ -10,7 +18,9 @@ service cloud.firestore {
     // personne ne peut le supprimer depuis l'appli.
     match /utilisateurs/{uid} {
       allow get: if request.auth != null;
-      allow list: if request.auth != null && request.query.limit <= 30;
+      // Les admins peuvent lister tous les profils, sans la limite de 30.
+      allow list: if estAdmin()
+        || (request.auth != null && request.query.limit <= 30);
       // La photo (texte base64) est limitée à environ 200 Ko.
       allow create, update: if request.auth != null
         && request.auth.uid == uid
@@ -236,6 +246,13 @@ service cloud.firestore {
               || request.auth.uid == get(/databases/$(database)/documents/appels/$(id)).data.appeleId);
         allow update, delete: if false;
       }
+    }
+
+    // Journal des actions des administrateurs : écrit uniquement par le
+    // serveur (SDK Admin), lisible seulement par les admins.
+    match /journal_admin/{id} {
+      allow read: if estAdmin();
+      allow write: if false;
     }
 
     // Tout le reste est verrouillé tant qu'on n'a pas écrit ses règles.

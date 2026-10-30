@@ -7,6 +7,78 @@
         { "fieldPath": "pourId", "order": "ASCENDING" },
         { "fieldPath": "etoiles", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "alertes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "type", "order": "ASCENDING" },
+        { "fieldPath": "creeLe", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "alertes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "statut", "order": "ASCENDING" },
+        { "fieldPath": "creeLe", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "alertes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "quartier", "order": "ASCENDING" },
+        { "fieldPath": "creeLe", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "alertes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "auteurId", "order": "ASCENDING" },
+        { "fieldPath": "creeLe", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "alertes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "aidantId", "order": "ASCENDING" },
+        { "fieldPath": "creeLe", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "avis",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "etoiles", "order": "ASCENDING" },
+        { "fieldPath": "creeLe", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "avis",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "pourId", "order": "ASCENDING" },
+        { "fieldPath": "creeLe", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "avis",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "deId", "order": "ASCENDING" },
+        { "fieldPath": "creeLe", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "avis",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "creeLe", "order": "ASCENDING" },
+        { "fieldPath": "etoiles", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
